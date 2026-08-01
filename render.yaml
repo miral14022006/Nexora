@@ -1,0 +1,421 @@
+# ==============================================================================
+# Nexora — Render Blueprint (Infrastructure-as-Code)
+#
+# Deploy with: Render Dashboard → "New Blueprint Instance" → select this repo
+# Or one-click: https://render.com/deploy?repo=https://github.com/miral14022006/Nexora
+#
+# Prerequisites you must provision EXTERNALLY (Render has no managed Kafka):
+#   • Upstash Kafka cluster  — free tier at https://console.upstash.com
+#   • S3-compatible store    — for media-service (AWS S3, Cloudflare R2, etc.)
+#
+# After deploying, fill in the sync:false env vars prompted in the Dashboard.
+# See README.md "Deploy to Render" for the full walkthrough.
+# ==============================================================================
+
+# ─── Environment Variable Groups ─────────────────────────────────────────────
+# Shared across many services so credentials aren't duplicated per service.
+
+envVarGroups:
+  - name: nexora-shared-secrets
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: JWT_ACCESS_SECRET
+        generateValue: true        # Render generates a secure random value
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: SERVICE_SECRET
+        generateValue: true
+      - key: BCRYPT_ROUNDS
+        value: "12"
+
+  - name: nexora-kafka
+    envVars:
+      - key: KAFKA_BROKERS
+        sync: false                 # Paste your Upstash Kafka broker URL
+      - key: KAFKA_SASL_USERNAME
+        sync: false                 # Upstash username
+      - key: KAFKA_SASL_PASSWORD
+        sync: false                 # Upstash password
+      - key: KAFKA_SASL_MECHANISM
+        value: scram-sha-256
+      - key: KAFKA_SSL
+        value: "true"
+
+  - name: nexora-kafka-topics
+    envVars:
+      - key: KAFKA_MESSAGE_EVENTS_TOPIC
+        value: message-events
+      - key: KAFKA_MESSAGE_EVENTS_PARTITIONS
+        value: "3"
+      - key: KAFKA_DELIVERED_TOPIC
+        value: chat.message.delivered
+      - key: KAFKA_READ_TOPIC
+        value: chat.message.read
+      - key: KAFKA_DLQ_TOPIC
+        value: message-events-dlq
+
+  - name: nexora-minio
+    envVars:
+      - key: MINIO_INTERNAL_ENDPOINT
+        sync: false                 # Your S3-compatible endpoint hostname
+      - key: MINIO_PUBLIC_ENDPOINT
+        sync: false                 # Public-facing endpoint for presigned URLs
+      - key: MINIO_PORT
+        value: "443"
+      - key: MINIO_USE_SSL
+        value: "true"
+      - key: MINIO_ACCESS_KEY
+        sync: false
+      - key: MINIO_SECRET_KEY
+        sync: false
+      - key: MINIO_BUCKET
+        value: nexora-media
+
+# ─── Managed Postgres ─────────────────────────────────────────────────────────
+
+databases:
+  - name: nexora-db
+    databaseName: nexora
+    user: nexora
+    plan: free                      # Swap to starter/basic for production
+
+# ─── Services ─────────────────────────────────────────────────────────────────
+
+services:
+  # ── Redis (Render Key Value) ──────────────────────────────────────────────
+  - type: keyvalue
+    name: nexora-redis
+    plan: free                      # Swap to starter for persistence
+    maxmemoryPolicy: allkeys-lru
+    ipAllowList:
+      - source: 0.0.0.0/0
+        description: allow all
+
+  # ── api-gateway (public entry point) ──────────────────────────────────────
+  - type: web
+    name: api-gateway
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./services/api-gateway/Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    envVars:
+      - fromGroup: nexora-shared-secrets
+      - key: SERVICE_NAME
+        value: api-gateway
+      - key: PORT
+        value: "3000"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: nexora-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: nexora-redis
+          property: connectionString
+      # Internal service URLs — Render private services are reachable at
+      # <service-name>:<port> over the internal network.
+      - key: AUTH_SERVICE_URL
+        fromService:
+          type: pserv
+          name: auth-service
+          property: hostport
+      - key: USER_SERVICE_URL
+        fromService:
+          type: pserv
+          name: user-service
+          property: hostport
+      - key: GROUP_SERVICE_URL
+        fromService:
+          type: pserv
+          name: group-service
+          property: hostport
+      - key: CHAT_SERVICE_URL
+        fromService:
+          type: pserv
+          name: chat-service
+          property: hostport
+      - key: MEDIA_SERVICE_URL
+        fromService:
+          type: pserv
+          name: media-service
+          property: hostport
+      - key: GATEWAY_HTTP_URL
+        fromService:
+          type: web
+          name: websocket-gateway
+          property: hostport
+      - key: WS_GATEWAY_URLS
+        fromService:
+          type: web
+          name: websocket-gateway
+          property: hostport
+
+  # ── auth-service (internal) ───────────────────────────────────────────────
+  - type: pserv
+    name: auth-service
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./services/auth-service/Dockerfile
+    dockerContext: .
+    envVars:
+      - fromGroup: nexora-shared-secrets
+      - key: SERVICE_NAME
+        value: auth-service
+      - key: PORT
+        value: "3001"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: nexora-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: nexora-redis
+          property: connectionString
+
+  # ── user-service (internal) ───────────────────────────────────────────────
+  - type: pserv
+    name: user-service
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./services/user-service/Dockerfile
+    dockerContext: .
+    envVars:
+      - fromGroup: nexora-shared-secrets
+      - fromGroup: nexora-kafka
+      - fromGroup: nexora-kafka-topics
+      - key: SERVICE_NAME
+        value: user-service
+      - key: PORT
+        value: "3002"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: nexora-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: nexora-redis
+          property: connectionString
+
+  # ── group-service (internal) ──────────────────────────────────────────────
+  - type: pserv
+    name: group-service
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./services/group-service/Dockerfile
+    dockerContext: .
+    envVars:
+      - fromGroup: nexora-shared-secrets
+      - fromGroup: nexora-kafka
+      - fromGroup: nexora-kafka-topics
+      - key: SERVICE_NAME
+        value: group-service
+      - key: PORT
+        value: "3003"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: nexora-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: nexora-redis
+          property: connectionString
+
+  # ── chat-service (internal) ───────────────────────────────────────────────
+  - type: pserv
+    name: chat-service
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./services/chat-service/Dockerfile
+    dockerContext: .
+    envVars:
+      - fromGroup: nexora-shared-secrets
+      - fromGroup: nexora-kafka
+      - fromGroup: nexora-kafka-topics
+      - key: SERVICE_NAME
+        value: chat-service
+      - key: PORT
+        value: "3004"
+      - key: KAFKA_CLIENT_ID
+        value: nexora-chat-service
+      - key: DATABASE_URL
+        fromDatabase:
+          name: nexora-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: nexora-redis
+          property: connectionString
+
+  # ── delivery-service (internal) ───────────────────────────────────────────
+  - type: pserv
+    name: delivery-service
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./services/delivery-service/Dockerfile
+    dockerContext: .
+    envVars:
+      - fromGroup: nexora-shared-secrets
+      - fromGroup: nexora-kafka
+      - fromGroup: nexora-kafka-topics
+      - key: SERVICE_NAME
+        value: delivery-service
+      - key: PORT
+        value: "3005"
+      - key: KAFKA_CLIENT_ID
+        value: nexora-delivery-service
+      - key: KAFKA_MESSAGE_EVENTS_GROUP
+        value: nexora-delivery-service
+      - key: DELIVERY_RECEIPT_CHANNEL
+        value: "delivery:receipts"
+      - key: PRESENCE_KEY_PREFIX
+        value: "presence:"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: nexora-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: nexora-redis
+          property: connectionString
+
+  # ── presence-service (internal) ───────────────────────────────────────────
+  - type: pserv
+    name: presence-service
+    runtime: docker
+    plan: free
+    region: oregon
+    rootDir: services/presence-service
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - fromGroup: nexora-shared-secrets
+      - fromGroup: nexora-kafka
+      - key: SERVICE_NAME
+        value: presence-service
+      - key: PORT
+        value: "3006"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: nexora-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: nexora-redis
+          property: connectionString
+
+  # ── notification-service (internal) ───────────────────────────────────────
+  - type: pserv
+    name: notification-service
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./services/notification-service/Dockerfile
+    dockerContext: .
+    envVars:
+      - fromGroup: nexora-shared-secrets
+      - fromGroup: nexora-kafka
+      - fromGroup: nexora-kafka-topics
+      - key: SERVICE_NAME
+        value: notification-service
+      - key: PORT
+        value: "3007"
+      - key: KAFKA_CLIENT_ID
+        value: nexora-notification-service
+      - key: KAFKA_MESSAGE_EVENTS_GROUP
+        value: nexora-notification-service
+      - key: PRESENCE_KEY_PREFIX
+        value: "presence:"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: nexora-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: nexora-redis
+          property: connectionString
+
+  # ── websocket-gateway (public — WS upgrades) ─────────────────────────────
+  - type: web
+    name: websocket-gateway
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./services/websocket-gateway/Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    envVars:
+      - fromGroup: nexora-shared-secrets
+      - key: SERVICE_NAME
+        value: websocket-gateway
+      - key: PORT
+        value: "3008"
+      - key: WS_HEARTBEAT_TIMEOUT_MS
+        value: "90000"
+      - key: PRESENCE_TTL_SECONDS
+        value: "90"
+      - key: PRESENCE_GRACE_SECONDS
+        value: "30"
+      - key: DELIVERY_RECEIPT_CHANNEL
+        value: "delivery:receipts"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: nexora-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: nexora-redis
+          property: connectionString
+
+  # ── media-service (internal) ──────────────────────────────────────────────
+  - type: pserv
+    name: media-service
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./services/media-service/Dockerfile
+    dockerContext: .
+    envVars:
+      - fromGroup: nexora-shared-secrets
+      - fromGroup: nexora-minio
+      - key: SERVICE_NAME
+        value: media-service
+      - key: PORT
+        value: "3010"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: nexora-db
+          property: connectionString
+
+  # ── Frontend (Render Static Site) ─────────────────────────────────────────
+  # Serves the Vite-built SPA. The VITE_API_BASE_URL env var is injected at
+  # build time so the frontend knows the api-gateway's public Render URL.
+  # SPA routing is handled by the rewrite rule (all paths → /index.html).
+  - type: web
+    name: nexora-frontend
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    envVars:
+      - key: VITE_API_BASE_URL
+        sync: false                 # Set to api-gateway's public URL, e.g. https://api-gateway-xxxx.onrender.com
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html

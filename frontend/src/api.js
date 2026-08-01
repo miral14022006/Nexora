@@ -1,7 +1,16 @@
 /**
  * Thin REST client for the API gateway. Automatically refreshes the access
  * token on 401 and retries the request once.
+ *
+ * VITE_API_BASE_URL — When deployed to Render (or any separate origin), set
+ * this build-time env var to the api-gateway's public URL, e.g.
+ * https://api-gateway-xxxx.onrender.com. When unset (local dev), relative
+ * paths work via Vite's dev proxy.
  */
+
+export const API_BASE = import.meta.env.VITE_API_BASE_URL
+  ? import.meta.env.VITE_API_BASE_URL.replace(/\/+$/, "")
+  : "";
 
 const SESSION_KEY = "nexora.session";
 
@@ -40,7 +49,7 @@ async function request(path, { method = "GET", body, auth = true, retried = fals
     headers["Authorization"] = `Bearer ${session.accessToken}`;
   }
 
-  const res = await fetch(`/api${path}`, {
+  const res = await fetch(`${API_BASE}/api${path}`, {
     method,
     headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
@@ -68,7 +77,7 @@ async function request(path, { method = "GET", body, auth = true, retried = fals
 
 async function refreshAccessToken() {
   const old = session;
-  const res = await fetch("/api/auth/refresh", {
+  const res = await fetch(`${API_BASE}/api/auth/refresh`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ refreshToken: old.refreshToken }),
@@ -119,7 +128,9 @@ export const api = {
 };
 
 export const wsUrl = () => {
-  const proto = window.location.protocol === "https:" ? "wss" : "ws";
+  const base = API_BASE || window.location.origin;
+  const proto = base.startsWith("https") ? "wss" : "ws";
+  const host = base.replace(/^https?:\/\//, "");
   const maxSeq = useStore.getState().maxSequence;
-  return `${proto}://${window.location.host}/ws?token=${encodeURIComponent(session?.accessToken ?? "")}&last_received_sequence=${maxSeq}`;
+  return `${proto}://${host}/ws?token=${encodeURIComponent(session?.accessToken ?? "")}&last_received_sequence=${maxSeq}`;
 };

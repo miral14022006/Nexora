@@ -1,4 +1,4 @@
-import { api, getSession, setSession, wsUrl } from "./api.js";
+import { api, API_BASE, getSession, setSession, wsUrl } from "./api.js";
 import { chatIdOf, useStore } from "./store.js";
 
 /**
@@ -72,7 +72,7 @@ async function refreshAndReconnect() {
     useStore.getState().signOut();
     return;
   }
-  const res = await fetch("/api/auth/refresh", {
+  const res = await fetch(`${API_BASE}/api/auth/refresh`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ refreshToken: session.refreshToken }),

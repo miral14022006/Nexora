@@ -1,0 +1,437 @@
+@import "tailwindcss";
+
+/* ================================================================
+   NEXORA — NEOMORPHIC DESIGN SYSTEM
+   Two full token sets: light (default) and dark (.dark on <html>).
+   Shadow pairs are specifically tuned per mode — NOT a naive invert.
+   ================================================================ */
+
+/* ---------- Light mode tokens ---------- */
+:root {
+  --nm-bg: #E0E5EC;
+  --nm-surface: #E0E5EC;
+  --nm-surface-tint: #d2e8e6;
+  --nm-text: #2D3436;
+  --nm-text-muted: #636E72;
+  --nm-text-faint: #9BA4A8;
+  --nm-accent: #3AAFA9;
+  --nm-accent-hover: #2E9E98;
+  --nm-accent-text: #ffffff;
+
+  /* Raised (extruded) shadow pair */
+  --nm-shadow-light: rgba(255,255,255,0.7);
+  --nm-shadow-dark: rgba(163,177,198,0.6);
+  --nm-raised: 6px 6px 12px var(--nm-shadow-dark), -6px -6px 12px var(--nm-shadow-light);
+  --nm-raised-sm: 3px 3px 6px var(--nm-shadow-dark), -3px -3px 6px var(--nm-shadow-light);
+  --nm-raised-lg: 10px 10px 20px var(--nm-shadow-dark), -10px -10px 20px var(--nm-shadow-light);
+
+  /* Pressed (inset) shadow pair */
+  --nm-pressed: inset 3px 3px 6px var(--nm-shadow-dark), inset -3px -3px 6px var(--nm-shadow-light);
+  --nm-pressed-lg: inset 5px 5px 10px var(--nm-shadow-dark), inset -5px -5px 10px var(--nm-shadow-light);
+
+  /* Borders (almost never used — depth from shadows) */
+  --nm-divider: rgba(163,177,198,0.25);
+
+  /* Error / status */
+  --nm-error: #E17055;
+  --nm-error-bg: #f0d5ce;
+  --nm-success: #3ddc97;
+
+  /* SVG / mesh */
+  --nm-mesh-grid: #cdd3dc;
+  --nm-mesh-node: #d0d5dd;
+  --nm-mesh-node-stroke: #b8bfc8;
+  --nm-mesh-path: #bcc3cc;
+  --nm-mesh-label: #636E72;
+
+  /* Fonts */
+  --font-display: "Space Grotesk Variable", "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-body: "Inter Variable", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+
+  /* Legacy tokens (for landing hero compatibility) */
+  --color-ink: var(--nm-bg);
+  --color-slate: var(--nm-surface);
+  --color-slate-2: var(--nm-surface);
+  --color-signal: var(--nm-accent);
+  --color-ember: #E17055;
+  --color-paper: var(--nm-text);
+  --color-mist: var(--nm-text-muted);
+  --color-line: var(--nm-divider);
+}
+
+/* ---------- Dark mode tokens ---------- */
+.dark {
+  --nm-bg: #2D3239;
+  --nm-surface: #2D3239;
+  --nm-surface-tint: #2a3a38;
+  --nm-text: #E0E5EC;
+  --nm-text-muted: #9BA4A8;
+  --nm-text-faint: #636E72;
+  --nm-accent: #4ECDC4;
+  --nm-accent-hover: #45B7AA;
+  --nm-accent-text: #1a1e22;
+
+  --nm-shadow-light: rgba(60,65,72,0.5);
+  --nm-shadow-dark: rgba(0,0,0,0.45);
+  --nm-raised: 6px 6px 12px var(--nm-shadow-dark), -6px -6px 12px var(--nm-shadow-light);
+  --nm-raised-sm: 3px 3px 6px var(--nm-shadow-dark), -3px -3px 6px var(--nm-shadow-light);
+  --nm-raised-lg: 10px 10px 20px var(--nm-shadow-dark), -10px -10px 20px var(--nm-shadow-light);
+
+  --nm-pressed: inset 3px 3px 6px var(--nm-shadow-dark), inset -3px -3px 6px var(--nm-shadow-light);
+  --nm-pressed-lg: inset 5px 5px 10px var(--nm-shadow-dark), inset -5px -5px 10px var(--nm-shadow-light);
+
+  --nm-divider: rgba(60,65,72,0.4);
+
+  --nm-error: #FF7675;
+  --nm-error-bg: #3d2a2a;
+  --nm-success: #3ddc97;
+
+  --nm-mesh-grid: #363c44;
+  --nm-mesh-node: #343a42;
+  --nm-mesh-node-stroke: #454d56;
+  --nm-mesh-path: #3e454e;
+  --nm-mesh-label: #9BA4A8;
+
+  --color-ink: var(--nm-bg);
+  --color-slate: var(--nm-surface);
+  --color-slate-2: var(--nm-surface);
+  --color-signal: var(--nm-accent);
+  --color-paper: var(--nm-text);
+  --color-mist: var(--nm-text-muted);
+  --color-line: var(--nm-divider);
+}
+
+/* Auto-detect system preference (fallback before explicit choice) */
+@media (prefers-color-scheme: dark) {
+  :root:not(.light) {
+    --nm-bg: #2D3239;
+    --nm-surface: #2D3239;
+    --nm-surface-tint: #2a3a38;
+    --nm-text: #E0E5EC;
+    --nm-text-muted: #9BA4A8;
+    --nm-text-faint: #636E72;
+    --nm-accent: #4ECDC4;
+    --nm-accent-hover: #45B7AA;
+    --nm-accent-text: #1a1e22;
+    --nm-shadow-light: rgba(60,65,72,0.5);
+    --nm-shadow-dark: rgba(0,0,0,0.45);
+    --nm-raised: 6px 6px 12px var(--nm-shadow-dark), -6px -6px 12px var(--nm-shadow-light);
+    --nm-raised-sm: 3px 3px 6px var(--nm-shadow-dark), -3px -3px 6px var(--nm-shadow-light);
+    --nm-raised-lg: 10px 10px 20px var(--nm-shadow-dark), -10px -10px 20px var(--nm-shadow-light);
+    --nm-pressed: inset 3px 3px 6px var(--nm-shadow-dark), inset -3px -3px 6px var(--nm-shadow-light);
+    --nm-pressed-lg: inset 5px 5px 10px var(--nm-shadow-dark), inset -5px -5px 10px var(--nm-shadow-light);
+    --nm-divider: rgba(60,65,72,0.4);
+    --nm-error: #FF7675;
+    --nm-error-bg: #3d2a2a;
+    --nm-mesh-grid: #363c44;
+    --nm-mesh-node: #343a42;
+    --nm-mesh-node-stroke: #454d56;
+    --nm-mesh-path: #3e454e;
+    --nm-mesh-label: #9BA4A8;
+    --color-ink: var(--nm-bg);
+    --color-slate: var(--nm-surface);
+    --color-slate-2: var(--nm-surface);
+    --color-signal: var(--nm-accent);
+    --color-paper: var(--nm-text);
+    --color-mist: var(--nm-text-muted);
+    --color-line: var(--nm-divider);
+  }
+}
+
+/* ================================================================
+   BASE RESETS
+   ================================================================ */
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-body);
+  background: var(--nm-bg);
+  color: var(--nm-text);
+  -webkit-font-smoothing: antialiased;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+:focus {
+  outline: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--nm-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--nm-accent) 30%, transparent);
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--nm-divider);
+  border-radius: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ================================================================
+   NEOMORPHIC UTILITY CLASSES
+   ================================================================ */
+
+/* Raised (extruded) — default card/button state */
+.nm-raised {
+  background: var(--nm-bg);
+  box-shadow: var(--nm-raised);
+  border: none;
+}
+
+.nm-raised-sm {
+  background: var(--nm-bg);
+  box-shadow: var(--nm-raised-sm);
+  border: none;
+}
+
+.nm-raised-lg {
+  background: var(--nm-bg);
+  box-shadow: var(--nm-raised-lg);
+  border: none;
+}
+
+/* Pressed (inset) — active/focused/selected state */
+.nm-pressed {
+  background: var(--nm-bg);
+  box-shadow: var(--nm-pressed);
+  border: none;
+}
+
+.nm-pressed-lg {
+  background: var(--nm-bg);
+  box-shadow: var(--nm-pressed-lg);
+  border: none;
+}
+
+/* Primary CTA button — solid teal fill with raised shadow on top */
+.nm-btn-primary {
+  background: var(--nm-accent);
+  color: var(--nm-accent-text);
+  box-shadow: var(--nm-raised-sm);
+  border: none;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.nm-btn-primary:hover {
+  background: var(--nm-accent-hover);
+  box-shadow: var(--nm-raised);
+}
+
+.nm-btn-primary:active {
+  box-shadow: var(--nm-pressed);
+}
+
+.nm-btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Icon button — soft-raised circle */
+.nm-icon-btn {
+  background: var(--nm-bg);
+  box-shadow: var(--nm-raised-sm);
+  border: none;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  color: var(--nm-text-muted);
+}
+
+.nm-icon-btn:hover {
+  color: var(--nm-text);
+}
+
+.nm-icon-btn:active,
+.nm-icon-btn.active {
+  box-shadow: var(--nm-pressed);
+}
+
+/* Input container */
+.nm-input {
+  background: var(--nm-bg);
+  box-shadow: var(--nm-pressed);
+  border: none;
+  color: var(--nm-text);
+  transition: box-shadow 0.15s ease;
+}
+
+.nm-input::placeholder {
+  color: var(--nm-text-faint);
+}
+
+.nm-input:focus {
+  box-shadow: var(--nm-pressed-lg);
+}
+
+/* Card */
+.nm-card {
+  background: var(--nm-bg);
+  box-shadow: var(--nm-raised);
+  border: none;
+  border-radius: 20px;
+}
+
+/* Sent message bubble — teal-tinted raised */
+.nm-bubble-sent {
+  background: var(--nm-surface-tint);
+  box-shadow: var(--nm-raised-sm);
+  color: var(--nm-text);
+}
+
+/* Received message bubble — standard raised */
+.nm-bubble-received {
+  background: var(--nm-bg);
+  box-shadow: var(--nm-raised-sm);
+  color: var(--nm-text);
+}
+
+/* ================================================================
+   LANDING HERO ANIMATIONS (preserved)
+   ================================================================ */
+
+@keyframes packet-travel {
+  0% {
+    offset-distance: 0%;
+    opacity: 0;
+  }
+  8% {
+    opacity: 1;
+  }
+  92% {
+    opacity: 1;
+  }
+  100% {
+    offset-distance: 100%;
+    opacity: 0;
+  }
+}
+
+@keyframes fanout-travel {
+  0% {
+    offset-distance: 0%;
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  90% {
+    opacity: 1;
+  }
+  100% {
+    offset-distance: 100%;
+    opacity: 0;
+  }
+}
+
+@keyframes presence-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@keyframes tick-pop {
+  0% {
+    transform: scale(0.4);
+    opacity: 0;
+  }
+  30% {
+    transform: scale(1.15);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* Scroll-triggered fade-in for landing sections */
+@keyframes nm-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.nm-animate-in {
+  animation: nm-fade-up 0.6s ease-out both;
+}
+
+.mesh-packet {
+  offset-path: path("var(--path)");
+  animation: packet-travel 4.5s cubic-bezier(0.45, 0, 0.25, 1) infinite;
+}
+
+.mesh-fanout {
+  offset-path: path("var(--path)");
+  animation: fanout-travel 5s cubic-bezier(0.45, 0, 0.25, 1) infinite;
+}
+
+.mesh-dot {
+  animation: presence-pulse 2.4s ease-in-out infinite;
+}
+
+.mesh-tick {
+  animation: tick-pop 0.5s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mesh-packet,
+  .mesh-fanout,
+  .mesh-dot,
+  .mesh-tick,
+  .nm-animate-in {
+    animation: none;
+  }
+}
+
+/* ================================================================
+   TAILWIND THEME BRIDGE
+   Let Tailwind reference our CSS variables via @theme
+   ================================================================ */
+
+@theme {
+  --color-ink: var(--nm-bg);
+  --color-slate: var(--nm-surface);
+  --color-slate-2: var(--nm-surface);
+  --color-signal: var(--nm-accent);
+  --color-ember: var(--nm-error);
+  --color-paper: var(--nm-text);
+  --color-mist: var(--nm-text-muted);
+  --color-line: var(--nm-divider);
+
+  --font-display: "Space Grotesk Variable", "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-body: "Inter Variable", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+}

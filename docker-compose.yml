@@ -1,0 +1,455 @@
+name: nexora
+
+services:
+  # ---------- Infrastructure ----------
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-nexora}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nexora}
+      POSTGRES_DB: ${POSTGRES_DB:-nexora}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nexora} -d ${POSTGRES_DB:-nexora}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  kafka:
+    # Apache Kafka in KRaft mode (no ZooKeeper) - see ARCHITECTURE.md
+    image: apache/kafka:3.8.0
+    ports:
+      - "${KAFKA_PORT:-9092}:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+    restart: unless-stopped
+
+  kafka-init:
+    # One-shot container: creates the message-events topic on first boot.
+    image: apache/kafka:3.8.0
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["/opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic ${KAFKA_MESSAGE_EVENTS_TOPIC:-message-events} --partitions ${KAFKA_MESSAGE_EVENTS_PARTITIONS:-3} --replication-factor 1 && /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic ${KAFKA_DELIVERED_TOPIC:-chat.message.delivered} --partitions 1 --replication-factor 1 && /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic ${KAFKA_READ_TOPIC:-chat.message.read} --partitions 1 --replication-factor 1 && /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic ${KAFKA_DLQ_TOPIC:-message-events-dlq} --partitions 1 --replication-factor 1 && echo 'kafka-init: topics ready'"]
+
+  minio:
+    # S3-compatible object storage for media (see ARCHITECTURE.md "Media
+    # Service"). 9000 = S3 API (host port maps it for presigned URLs),
+    # 9001 = web console for demos.
+    image: quay.io/minio/minio:latest
+    command: server /data --console-address ":9001"
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-nexora}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-nexora-minio-secret}
+    volumes:
+      - minio-data:/data
+    restart: unless-stopped
+
+  minio-init:
+    # One-shot container: creates the media bucket on first boot.
+    image: minio/mc
+    depends_on:
+      minio:
+        condition: service_started
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-nexora} ${MINIO_ROOT_PASSWORD:-nexora-minio-secret} && mc mb --ignore-existing local/${MINIO_BUCKET:-nexora-media} && echo 'minio-init: bucket ready'"]
+    restart: "no"
+
+  # ---------- Backend services ----------
+  # Port exposure policy: only the api-gateway (HTTP+WS entry point) and the
+  # frontend are reachable from the host. Everything else is internal-only and
+  # is reached via service DNS on the compose network. chat-service and
+  # websocket-gateway intentionally publish NO host port so `docker compose up
+  # --scale` can run N replicas without port conflicts (see README "Scaling").
+  api-gateway:
+    build:
+      context: .
+      dockerfile: services/api-gateway/Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: development
+      SERVICE_NAME: api-gateway
+      PORT: 3000
+      AUTH_SERVICE_URL: ${AUTH_SERVICE_URL:-http://auth-service:3001}
+      USER_SERVICE_URL: ${USER_SERVICE_URL:-http://user-service:3002}
+      GROUP_SERVICE_URL: ${GROUP_SERVICE_URL:-http://group-service:3003}
+      CHAT_SERVICE_URL: ${CHAT_SERVICE_URL:-http://chat-service:3004}
+      MEDIA_SERVICE_URL: ${MEDIA_SERVICE_URL:-http://media-service:3010}
+      GATEWAY_HTTP_URL: ${GATEWAY_HTTP_URL:-http://websocket-gateway:3008}
+      WS_GATEWAY_URLS: ${WS_GATEWAY_URLS:-ws://websocket-gateway:3008,ws://websocket-gateway-2:3009}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-dev-only-access-secret}
+      SERVICE_SECRET: ${SERVICE_SECRET:-dev-internal-secret}
+    depends_on:
+      auth-service:
+        condition: service_healthy
+      user-service:
+        condition: service_healthy
+      group-service:
+        condition: service_healthy
+      chat-service:
+        condition: service_healthy
+      media-service:
+        condition: service_healthy
+      websocket-gateway:
+        condition: service_healthy
+      websocket-gateway-2:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  auth-service:
+    build:
+      context: .
+      dockerfile: services/auth-service/Dockerfile
+    ports:
+      - "3001:3001"
+    environment:
+      NODE_ENV: development
+      SERVICE_NAME: auth-service
+      PORT: 3001
+      KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka:9092}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      DATABASE_URL: ${DATABASE_URL:-postgres://nexora:nexora@postgres:5432/nexora}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-dev-only-access-secret}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-dev-only-refresh-secret}
+      BCRYPT_ROUNDS: ${BCRYPT_ROUNDS:-10}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  user-service:
+    build:
+      context: .
+      dockerfile: services/user-service/Dockerfile
+    ports:
+      - "3002:3002"
+    environment:
+      NODE_ENV: development
+      SERVICE_NAME: user-service
+      PORT: 3002
+      KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka:9092}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      DATABASE_URL: ${DATABASE_URL:-postgres://nexora:nexora@postgres:5432/nexora}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-dev-only-access-secret}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3002/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  group-service:
+    build:
+      context: .
+      dockerfile: services/group-service/Dockerfile
+    ports:
+      - "3003:3003"
+    environment:
+      NODE_ENV: development
+      SERVICE_NAME: group-service
+      PORT: 3003
+      KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka:9092}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      DATABASE_URL: ${DATABASE_URL:-postgres://nexora:nexora@postgres:5432/nexora}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-dev-only-access-secret}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3003/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  chat-service:
+    build:
+      context: .
+      dockerfile: services/chat-service/Dockerfile
+    # Internal-only (no host port) so `--scale chat-service=2` works. chat-service
+    # is a Kafka producer keyed by conversation id — multiple replicas share the
+    # topic partition ordering and never duplicate a conversation stream.
+    environment:
+      NODE_ENV: development
+      SERVICE_NAME: chat-service
+      PORT: 3004
+      KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka:9092}
+      KAFKA_CLIENT_ID: ${KAFKA_CLIENT_ID:-nexora-chat-service}
+      KAFKA_MESSAGE_EVENTS_TOPIC: ${KAFKA_MESSAGE_EVENTS_TOPIC:-message-events}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      DATABASE_URL: ${DATABASE_URL:-postgres://nexora:nexora@postgres:5432/nexora}
+      SERVICE_SECRET: ${SERVICE_SECRET:-dev-internal-secret}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3004/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  delivery-service:
+    build:
+      context: .
+      dockerfile: services/delivery-service/Dockerfile
+    ports:
+      - "3005:3005"
+    environment:
+      NODE_ENV: development
+      SERVICE_NAME: delivery-service
+      PORT: 3005
+      KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka:9092}
+      KAFKA_CLIENT_ID: ${KAFKA_CLIENT_ID:-nexora-delivery-service}
+      KAFKA_MESSAGE_EVENTS_TOPIC: ${KAFKA_MESSAGE_EVENTS_TOPIC:-message-events}
+      KAFKA_MESSAGE_EVENTS_GROUP: ${KAFKA_MESSAGE_EVENTS_GROUP:-nexora-delivery-service}
+      KAFKA_DELIVERED_TOPIC: ${KAFKA_DELIVERED_TOPIC:-chat.message.delivered}
+      KAFKA_READ_TOPIC: ${KAFKA_READ_TOPIC:-chat.message.read}
+      KAFKA_DLQ_TOPIC: ${KAFKA_DLQ_TOPIC:-message-events-dlq}
+      DELIVERY_RECEIPT_CHANNEL: ${DELIVERY_RECEIPT_CHANNEL:-delivery:receipts}
+      PRESENCE_KEY_PREFIX: ${PRESENCE_KEY_PREFIX:-presence:}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      DATABASE_URL: ${DATABASE_URL:-postgres://nexora:nexora@postgres:5432/nexora}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-dev-only-access-secret}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3005/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  presence-service:
+    build: ./services/presence-service
+    ports:
+      - "3006:3006"
+    environment:
+      NODE_ENV: development
+      SERVICE_NAME: presence-service
+      PORT: 3006
+      KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka:9092}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      DATABASE_URL: ${DATABASE_URL:-postgres://nexora:nexora@postgres:5432/nexora}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-dev-only-access-secret}
+    depends_on:
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3006/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  notification-service:
+    build:
+      context: .
+      dockerfile: services/notification-service/Dockerfile
+    ports:
+      - "3007:3007"
+    environment:
+      NODE_ENV: development
+      SERVICE_NAME: notification-service
+      PORT: 3007
+      KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka:9092}
+      KAFKA_CLIENT_ID: ${KAFKA_CLIENT_ID:-nexora-notification-service}
+      KAFKA_MESSAGE_EVENTS_TOPIC: ${KAFKA_MESSAGE_EVENTS_TOPIC:-message-events}
+      KAFKA_MESSAGE_EVENTS_GROUP: ${KAFKA_MESSAGE_EVENTS_GROUP:-nexora-notification-service}
+      PRESENCE_KEY_PREFIX: ${PRESENCE_KEY_PREFIX:-presence:}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      DATABASE_URL: ${DATABASE_URL:-postgres://nexora:nexora@postgres:5432/nexora}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-dev-only-access-secret}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3007/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  media-service:
+    # Pre-signed upload URLs + metadata + signed delivery URLs. Files are never
+    # proxied through chat-service: the browser PUTs straight to MinIO using a
+    # pre-signed URL. Internal-only for the same reason as chat-service.
+    build:
+      context: .
+      dockerfile: services/media-service/Dockerfile
+    environment:
+      NODE_ENV: development
+      SERVICE_NAME: media-service
+      PORT: 3010
+      DATABASE_URL: ${DATABASE_URL:-postgres://nexora:nexora@postgres:5432/nexora}
+      SERVICE_SECRET: ${SERVICE_SECRET:-dev-internal-secret}
+      # Two MinIO endpoints: the internal DNS name for server-side operations,
+      # and the browser-reachable host for the URLs embedded in presigned
+      # signatures (see ARCHITECTURE.md "Media Service").
+      MINIO_INTERNAL_ENDPOINT: ${MINIO_INTERNAL_ENDPOINT:-minio}
+      MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:-localhost}
+      MINIO_PORT: ${MINIO_PORT:-9000}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-nexora}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-nexora-minio-secret}
+      MINIO_BUCKET: ${MINIO_BUCKET:-nexora-media}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3010/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  websocket-gateway:
+    build:
+      context: .
+      dockerfile: services/websocket-gateway/Dockerfile
+    # Internal-only (no host port) so `--scale websocket-gateway=N` works; clients
+    # always reach WS via the api-gateway /ws upgrade (round-robin). Instances
+    # share Redis pub/sub (deliver:* channels) + Postgres — see ARCHITECTURE.md.
+    environment:
+      NODE_ENV: development
+      SERVICE_NAME: websocket-gateway
+      PORT: 3008
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      DATABASE_URL: ${DATABASE_URL:-postgres://nexora:nexora@postgres:5432/nexora}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-dev-only-access-secret}
+      WS_HEARTBEAT_TIMEOUT_MS: ${WS_HEARTBEAT_TIMEOUT_MS:-90000}
+      PRESENCE_TTL_SECONDS: ${PRESENCE_TTL_SECONDS:-90}
+      PRESENCE_GRACE_SECONDS: ${PRESENCE_GRACE_SECONDS:-30}
+      DELIVERY_RECEIPT_CHANNEL: ${DELIVERY_RECEIPT_CHANNEL:-delivery:receipts}
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3008/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  websocket-gateway-2:
+    # Second instance for the horizontal-scaling proof: same image, own port,
+    # sharing the same Redis pub/sub (deliver channels) and PostgreSQL.
+    # Internal-only for the same reason as websocket-gateway above.
+    build:
+      context: .
+      dockerfile: services/websocket-gateway/Dockerfile
+    environment:
+      NODE_ENV: development
+      SERVICE_NAME: websocket-gateway-2
+      PORT: 3009
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      DATABASE_URL: ${DATABASE_URL:-postgres://nexora:nexora@postgres:5432/nexora}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-dev-only-access-secret}
+      WS_HEARTBEAT_TIMEOUT_MS: ${WS_HEARTBEAT_TIMEOUT_MS:-90000}
+      PRESENCE_TTL_SECONDS: ${PRESENCE_TTL_SECONDS:-90}
+      PRESENCE_GRACE_SECONDS: ${PRESENCE_GRACE_SECONDS:-30}
+      DELIVERY_RECEIPT_CHANNEL: ${DELIVERY_RECEIPT_CHANNEL:-delivery:receipts}
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3009/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ---------- Frontend ----------
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  redis-data:
+  kafka-data:
+  minio-data:

@@ -1,0 +1,23 @@
+{
+  "name": "nexora-api-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@nexora/verify-jwt": "^0.1.0",
+    "express": "^4.21.2",
+    "http-proxy": "^1.18.1"
+  },
+  "devDependencies": {
+    "jsonwebtoken": "^9.0.2",
+    "supertest": "^7.0.0",
+    "vitest": "^3.0.5",
+    "ws": "^8.18.0"
+  }
+}

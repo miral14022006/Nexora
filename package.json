@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "scripts": {
+    "start": "echo '❌ ERROR: This is a monorepo root — individual services must be deployed via their own Dockerfiles. If you see this on Render, switch the service Environment to Docker (not Node) or deploy via the render.yaml Blueprint. See README.md → Deploy to Render.' && exit 1"
+  },
   "workspaces": [
     "services/*",
     "packages/*"

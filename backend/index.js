@@ -25,26 +25,16 @@ const INTERNAL_PORTS = {
   media: 3010,
 };
 
-// ── Ensure downstream env vars point to localhost ────────────────────────────
-// The api-gateway's config.js reads these to know where to proxy. In Docker
-// Compose they point to Docker DNS names; here they point to localhost.
-function setDefaultEnv(key, value) {
-  if (!process.env[key]) process.env[key] = value;
-}
-
-setDefaultEnv("AUTH_SERVICE_URL", `http://localhost:${INTERNAL_PORTS.auth}`);
-setDefaultEnv("USER_SERVICE_URL", `http://localhost:${INTERNAL_PORTS.user}`);
-setDefaultEnv("GROUP_SERVICE_URL", `http://localhost:${INTERNAL_PORTS.group}`);
-setDefaultEnv("CHAT_SERVICE_URL", `http://localhost:${INTERNAL_PORTS.chat}`);
-setDefaultEnv("MEDIA_SERVICE_URL", `http://localhost:${INTERNAL_PORTS.media}`);
-setDefaultEnv(
-  "GATEWAY_HTTP_URL",
-  `http://localhost:${INTERNAL_PORTS.websocketGateway}`
-);
-setDefaultEnv(
-  "WS_GATEWAY_URLS",
-  `ws://localhost:${INTERNAL_PORTS.websocketGateway}`
-);
+// ── Ensure downstream env vars point to IPv4 127.0.0.1 ───────────────────────
+// The api-gateway's config.js reads these to know where to proxy. We force
+// 127.0.0.1 so http-proxy connects directly over IPv4 matching where services bind.
+process.env.AUTH_SERVICE_URL = `http://127.0.0.1:${INTERNAL_PORTS.auth}`;
+process.env.USER_SERVICE_URL = `http://127.0.0.1:${INTERNAL_PORTS.user}`;
+process.env.GROUP_SERVICE_URL = `http://127.0.0.1:${INTERNAL_PORTS.group}`;
+process.env.CHAT_SERVICE_URL = `http://127.0.0.1:${INTERNAL_PORTS.chat}`;
+process.env.MEDIA_SERVICE_URL = `http://127.0.0.1:${INTERNAL_PORTS.media}`;
+process.env.GATEWAY_HTTP_URL = `http://127.0.0.1:${INTERNAL_PORTS.websocketGateway}`;
+process.env.WS_GATEWAY_URLS = `ws://127.0.0.1:${INTERNAL_PORTS.websocketGateway}`;
 
 // ── Shared retry helper ──────────────────────────────────────────────────────
 async function withRetry(fn, { attempts = 20, delayMs = 3000, label } = {}) {

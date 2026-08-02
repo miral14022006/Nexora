@@ -294,12 +294,12 @@ Nexora ships as a single Infrastructure-as-Code blueprint — [`render.yaml`](re
 
 ```
 Browser → nexora-frontend (web/nginx) → /api + /ws → nexora-api-gateway (web)
-                                                        → 9× pserv (auth, user, group, chat, delivery,
+                                                        → 9× web/free (auth, user, group, chat, delivery,
                                                            presence, notification, media, websocket-gateway)
                                                         → nexora-postgres + nexora-redis (managed, internal)
 ```
 
-- Only the **frontend** and **api-gateway** are public (`type: web`); everything else is a private service (`pserv`) reachable only over Render's internal network.
+- Only the **frontend** and **api-gateway** are meant to be public. The blueprint currently runs in **free-tier demo mode** (all services `web` + `free` — free services sleep after 15 min idle, and each gets a public URL; data stays JWT/SERVICE_SECRET-protected). For production, switch backend services to `pserv` + `starter` in render.yaml.
 - `fromService hostport` injects bare `host:port` values; the api-gateway's `config.js` adds the scheme automatically (compose injects full URLs — one config, both environments).
 - The frontend's nginx proxies relative `/api` + `/ws` to the gateway (`API_GATEWAY_UPSTREAM`, injected at boot), so no `VITE_API_BASE_URL` is needed by default.
 - All services boot concurrently and retry DB/Redis connections at startup, so provisioning order never matters.
@@ -330,6 +330,6 @@ curl -X POST https://api-gateway-xxxx.onrender.com/api/auth/signup \
 
 ### Free tier notes
 
-- Free pservs are **not available** on Render — the blueprint uses **starter** for all services.
+- Free **pservs** are not available on Render — the free-tier blueprint uses `web` + `free` for every compute service (each gets a public URL, but user data stays JWT-protected and internal routes require `SERVICE_SECRET`).
 - Free Postgres expires after 30 days; free Key Value has no persistence. Swap to `basic-256mb` / `journal-snapshot` for production.
-- Free web services spin down after 15 min of inactivity — this kills WebSocket sessions and Kafka consumers; keep services on starter for a stable deployment.
+- Free web services spin down after 15 min of inactivity — WebSocket sessions and Kafka consumers pause while asleep and resume on the next request; an open browser tab keeps the chain awake. Upgrade plans in `render.yaml` for a stable deployment.

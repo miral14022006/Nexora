@@ -14,21 +14,29 @@ they're provisioned externally and wired in with credentials.
 
 ## 1. What deploys where
 
+> **Current blueprint mode: FREE-TIER DEMO.** Every service is `type: web` +
+> `plan: free` ($0/month) because Render's free plan doesn't allow private
+> services. Free web services spin down after 15 min idle and each gets a
+> public URL (JWT + `SERVICE_SECRET` still protect the data). To get
+> production behavior, switch any service back to `type: pserv` + `plan: starter`.
+
 | Render resource        | Type        | Plan   | Notes                                              |
 |------------------------|-------------|--------|----------------------------------------------------|
-| `nexora-frontend`      | web (docker)| starter | Vite SPA behind nginx; proxies `/api` + `/ws` to the gateway |
-| `nexora-api-gateway`   | web (docker)| starter | **Only public API entry point** (`/api/*`, `/ws`)   |
-| `nexora-websocket-gateway` | pserv  | starter | WS termination, presence, receipt fan-out — internal only |
-| `nexora-auth` … `nexora-media` | pserv (9×) | starter | All downstream services — internal only |
+| `nexora-frontend`      | web (docker)| free   | Vite SPA behind nginx; proxies `/api` + `/ws` to the gateway |
+| `nexora-api-gateway`   | web (docker)| free   | **Primary API entry point** (`/api/*`, `/ws`)       |
+| `nexora-websocket-gateway` | web  | free   | WS termination, presence, receipt fan-out           |
+| `nexora-auth` … `nexora-media` | web (9×) | free | Downstream services (public URLs but token-protected) |
 | `nexora-postgres`      | database    | free    | Managed Postgres 16 — internal-network only        |
 | `nexora-redis`         | keyvalue    | free    | Managed Redis 7 — internal-network only            |
 | `nexora-shared-secrets` | env group  | —       | `generateValue` secrets (JWT, SERVICE_SECRET)      |
 | `nexora-kafka` / `nexora-minio` | env groups | — | Credentials you paste after first deploy (`sync: false`) |
 
-> **Why are all services private?** Only the frontend and the API gateway need
-> public URLs. Every other service is a `pserv` reachable exclusively over
-> Render's internal network — the browser can never touch the services
-> directly, exactly like the Docker Compose topology.
+> **Why are all services private (production mode)?** Only the frontend and the
+> API gateway need public URLs. In the paid configuration every other service
+> is a `pserv` reachable exclusively over Render's internal network. In the
+> current free-tier demo mode they're public web services instead — protected
+> by JWTs for user data and by `SERVICE_SECRET` trust headers for internal
+> routes.
 
 ---
 
@@ -120,8 +128,8 @@ nexora-frontend (web, nginx)
   ▼
 nexora-api-gateway (web) ── fromService hostport ──▶ auth, user, group,
   │  /ws upgrade proxying          chat, delivery, presence,
-  ▼                                notification, media  (pserv, internal)
-nexora-websocket-gateway (pserv)
+  ▼                                notification, media  (web, free-mode)
+nexora-websocket-gateway (web, free-mode)
   │  Redis pub/sub: deliver:<userId>, presence keys, receipt channel
   ▼
 nexora-postgres + nexora-redis (managed, internal-only)
@@ -222,11 +230,13 @@ delivery-service.
 
 - Free **Postgres** expires after 30 days → move to `basic-256mb` before then.
 - Free **Key Value** has no persistence (`persistenceMode: off`).
-- Free **web** services spin down after 15 min of inactivity — fine for demos,
-  but **kills WebSocket sessions and Kafka consumers**. For a stable deploy,
-  keep every service on **starter** as the blueprint ships.
-- Free pservs are **not allowed at all** (Render restriction) — the blueprint
-  already uses starter for all of them.
+- Free **web** services spin down after 15 min of inactivity. An open browser
+  tab keeps the WebSocket chain awake (heartbeats count as traffic); Kafka
+  consumers pause while asleep and resume on the next request.
+- Free **pservs are not allowed** (Render restriction) — that's why the
+  free-tier blueprint uses web services for everything.
+- Each free web service gets its own public URL; user data is JWT-protected
+  and internal routes require the `SERVICE_SECRET` trust header.
 
 ### Recommended production config
 
@@ -272,8 +282,9 @@ consumer groups (`KAFKA_MESSAGE_EVENTS_GROUP`).
 ## 10. Troubleshooting & FAQ
 
 **Q: Blueprint sync fails with "free plan not available for private services".**
-The blueprint uses starter for all pservs — make sure you haven't edited plans
-down to free on a private service.
+The free-tier blueprint uses `type: web` for every compute service (free plan
+is not allowed on pservs) — make sure you haven't changed a service back to
+`pserv` without also setting a paid plan.
 
 **Q: Services crash-loop at first boot.**
 Expected while Postgres/Redis provision (retries last ~60s). If it keeps

@@ -5,14 +5,27 @@
 # Deploy with: Render Dashboard -> "New Blueprint Instance" -> select this repo
 # Or one-click: https://render.com/deploy?repo=https://github.com/miral14022006/nexora
 #
-# Notes:
+# FREE-TIER DEMO MODE:
+#   - Every service is `type: web` + `plan: free` — $0/month (free web services
+#     are the only free plan allowed for compute on Render).
+#   - CAVEATS:
+#       * Free web services spin down after 15 minutes of idle traffic. Active
+#         browser tabs keep the WebSocket chain awake (heartbeats count as
+#         traffic); Kafka consumers and background work pause while asleep and
+#         resume on the next request.
+#       * Every service gets a PUBLIC URL (free services can't be private).
+#         Downstream services are still protected: api-gateway-issued JWTs
+#         guard user-scoped routes, and SERVICE_SECRET guards internal trust
+#         headers on chat/media. See SECURITY note in DEPLOY_RENDER.md.
+#   - For production behavior (private services, no spin-down), swap any
+#     `plan: free` + `type: web` back to `type: pserv` + `plan: starter`.
+#
+# Other notes:
 #   - All services deploy concurrently; every service retries its DB/Redis
 #     connections at startup (withRetry) so boot order doesn't matter.
 #   - Kafka and S3 are NOT provided by Render — provision them externally
 #     (Upstash Kafka + any S3-compatible store) and fill the sync:false env
 #     vars prompted in the Dashboard after the first deploy.
-#   - api-gateway + frontend are public web services; every other service is
-#     a private service reachable only over Render's internal network.
 #   - Free Postgres expires after 30 days; swap to basic-256mb for production.
 #
 # Schema: https://render.com/docs/blueprint-spec
@@ -78,7 +91,7 @@ databases:
     region: oregon
     ipAllowList: []
 
-# ─── Services ────────────────────────────────────────────────────────────────
+# ─── Services (all free web — see FREE-TIER DEMO MODE above) ─────────────────
 services:
   # ── Redis (Render Key Value, internal-only) ───────────────────────────────
   - type: keyvalue
@@ -97,7 +110,7 @@ services:
     runtime: docker
     dockerContext: ./frontend
     dockerfilePath: frontend/Dockerfile
-    plan: starter
+    plan: free
     region: oregon
     autoDeployTrigger: commit
     healthCheckPath: /health
@@ -116,7 +129,7 @@ services:
     runtime: docker
     dockerContext: .
     dockerfilePath: services/api-gateway/Dockerfile
-    plan: starter
+    plan: free
     region: oregon
     autoDeployTrigger: commit
     healthCheckPath: /health
@@ -126,53 +139,54 @@ services:
         value: api-gateway
       - key: PORT
         value: "3000"
-      # Downstream private services (fromService hostport = bare "host:port";
+      # Downstream service URLs (fromService hostport = bare "host:port";
       # api-gateway's config.js adds the http:// scheme).
       - key: AUTH_SERVICE_URL
         fromService:
           name: nexora-auth
-          type: pserv
+          type: web
           property: hostport
       - key: USER_SERVICE_URL
         fromService:
           name: nexora-user
-          type: pserv
+          type: web
           property: hostport
       - key: GROUP_SERVICE_URL
         fromService:
           name: nexora-group
-          type: pserv
+          type: web
           property: hostport
       - key: CHAT_SERVICE_URL
         fromService:
           name: nexora-chat
-          type: pserv
+          type: web
           property: hostport
       - key: MEDIA_SERVICE_URL
         fromService:
           name: nexora-media
-          type: pserv
+          type: web
           property: hostport
       - key: GATEWAY_HTTP_URL
         fromService:
           name: nexora-websocket-gateway
-          type: pserv
+          type: web
           property: hostport
       - key: WS_GATEWAY_URLS
         fromService:
           name: nexora-websocket-gateway
-          type: pserv
+          type: web
           property: hostport
 
-  # ── websocket-gateway (internal — browser never connects directly) ────────
-  - type: pserv
+  # ── websocket-gateway (WS termination; browser reaches it via api-gateway) ─
+  - type: web
     name: nexora-websocket-gateway
     runtime: docker
     dockerContext: .
     dockerfilePath: services/websocket-gateway/Dockerfile
-    plan: starter
+    plan: free
     region: oregon
     autoDeployTrigger: commit
+    healthCheckPath: /health
     envVars:
       - fromGroup: nexora-shared-secrets
       - key: SERVICE_NAME
@@ -191,15 +205,16 @@ services:
           type: keyvalue
           property: connectionString
 
-  # ── auth-service (internal) ───────────────────────────────────────────────
-  - type: pserv
+  # ── auth-service ──────────────────────────────────────────────────────────
+  - type: web
     name: nexora-auth
     runtime: docker
     dockerContext: .
     dockerfilePath: services/auth-service/Dockerfile
-    plan: starter
+    plan: free
     region: oregon
     autoDeployTrigger: commit
+    healthCheckPath: /health
     envVars:
       - fromGroup: nexora-shared-secrets
       - key: SERVICE_NAME
@@ -211,15 +226,16 @@ services:
           name: nexora-postgres
           property: connectionString
 
-  # ── user-service (internal) ───────────────────────────────────────────────
-  - type: pserv
+  # ── user-service ──────────────────────────────────────────────────────────
+  - type: web
     name: nexora-user
     runtime: docker
     dockerContext: .
     dockerfilePath: services/user-service/Dockerfile
-    plan: starter
+    plan: free
     region: oregon
     autoDeployTrigger: commit
+    healthCheckPath: /health
     envVars:
       - fromGroup: nexora-shared-secrets
       - key: SERVICE_NAME
@@ -231,15 +247,16 @@ services:
           name: nexora-postgres
           property: connectionString
 
-  # ── group-service (internal) ──────────────────────────────────────────────
-  - type: pserv
+  # ── group-service ─────────────────────────────────────────────────────────
+  - type: web
     name: nexora-group
     runtime: docker
     dockerContext: .
     dockerfilePath: services/group-service/Dockerfile
-    plan: starter
+    plan: free
     region: oregon
     autoDeployTrigger: commit
+    healthCheckPath: /health
     envVars:
       - fromGroup: nexora-shared-secrets
       - key: SERVICE_NAME
@@ -251,15 +268,16 @@ services:
           name: nexora-postgres
           property: connectionString
 
-  # ── chat-service (internal) ───────────────────────────────────────────────
-  - type: pserv
+  # ── chat-service ──────────────────────────────────────────────────────────
+  - type: web
     name: nexora-chat
     runtime: docker
     dockerContext: .
     dockerfilePath: services/chat-service/Dockerfile
-    plan: starter
+    plan: free
     region: oregon
     autoDeployTrigger: commit
+    healthCheckPath: /health
     envVars:
       - fromGroup: nexora-shared-secrets
       - fromGroup: nexora-kafka
@@ -277,15 +295,16 @@ services:
           type: keyvalue
           property: connectionString
 
-  # ── delivery-service (internal, Kafka consumer) ───────────────────────────
-  - type: pserv
+  # ── delivery-service (Kafka consumer) ─────────────────────────────────────
+  - type: web
     name: nexora-delivery
     runtime: docker
     dockerContext: .
     dockerfilePath: services/delivery-service/Dockerfile
-    plan: starter
+    plan: free
     region: oregon
     autoDeployTrigger: commit
+    healthCheckPath: /health
     envVars:
       - fromGroup: nexora-shared-secrets
       - fromGroup: nexora-kafka
@@ -305,15 +324,16 @@ services:
           type: keyvalue
           property: connectionString
 
-  # ── presence-service (internal) ───────────────────────────────────────────
-  - type: pserv
+  # ── presence-service ──────────────────────────────────────────────────────
+  - type: web
     name: nexora-presence
     runtime: docker
     dockerContext: .
     dockerfilePath: services/presence-service/Dockerfile
-    plan: starter
+    plan: free
     region: oregon
     autoDeployTrigger: commit
+    healthCheckPath: /health
     envVars:
       - fromGroup: nexora-shared-secrets
       - key: SERVICE_NAME
@@ -321,15 +341,16 @@ services:
       - key: PORT
         value: "3006"
 
-  # ── notification-service (internal, Kafka consumer) ───────────────────────
-  - type: pserv
+  # ── notification-service (Kafka consumer) ─────────────────────────────────
+  - type: web
     name: nexora-notification
     runtime: docker
     dockerContext: .
     dockerfilePath: services/notification-service/Dockerfile
-    plan: starter
+    plan: free
     region: oregon
     autoDeployTrigger: commit
+    healthCheckPath: /health
     envVars:
       - fromGroup: nexora-shared-secrets
       - fromGroup: nexora-kafka
@@ -347,15 +368,16 @@ services:
           type: keyvalue
           property: connectionString
 
-  # ── media-service (internal) ──────────────────────────────────────────────
-  - type: pserv
+  # ── media-service ─────────────────────────────────────────────────────────
+  - type: web
     name: nexora-media
     runtime: docker
     dockerContext: .
     dockerfilePath: services/media-service/Dockerfile
-    plan: starter
+    plan: free
     region: oregon
     autoDeployTrigger: commit
+    healthCheckPath: /health
     envVars:
       - fromGroup: nexora-shared-secrets
       - fromGroup: nexora-minio

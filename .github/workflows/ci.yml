@@ -78,11 +78,15 @@ jobs:
           KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
           KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
           KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+        # TCP probe: kafka-topics.sh would fail here because the advertised
+        # listener (localhost:19092, the host-mapped port) is unreachable from
+        # inside the container. The plaintext socket only binds once the
+        # controller quorum is up, so a TCP check is a reliable readiness gate.
         options: >-
-          --health-cmd "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list"
-          --health-interval 10s
-          --health-timeout 10s
-          --health-retries 20
+          --health-cmd "bash -c 'exec 3<>/dev/tcp/127.0.0.1/9092 && exec 3<&- && exec 3>&-'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
           --health-start-period 20s
 
       minio:
@@ -120,6 +124,14 @@ jobs:
 
       - name: Create Kafka topics (idempotent, retries until broker is up)
         run: node scripts/create-topics.mjs
+
+      - name: Wait for MinIO to be ready
+        run: |
+          for i in $(seq 1 30); do
+            curl -fsS http://localhost:19000/minio/health/live >/dev/null 2>&1 && exit 0
+            sleep 1
+          done
+          echo "MinIO not ready after 30s" && exit 1
 
       # The websocket-gateway scaling test connects to TWO live instances.
       - name: Start websocket-gateway instances (3008 + 3009)

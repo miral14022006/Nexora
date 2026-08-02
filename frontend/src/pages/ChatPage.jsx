@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useStore } from "../store.js";
 import Sidebar from "../components/Sidebar.jsx";
 import ChatWindow from "../components/ChatWindow.jsx";
@@ -12,6 +13,7 @@ export default function ChatPage() {
   const error = useStore((s) => s.error);
   const setError = useStore((s) => s.setError);
   const activeChat = useStore((s) => s.activeChat);
+  const navigate = useNavigate();
 
   const [showNewChat, setShowNewChat] = useState(false);
   const [showGroups, setShowGroups] = useState(false);
@@ -27,11 +29,13 @@ export default function ChatPage() {
       className="flex h-screen overflow-hidden font-sans"
       style={{ background: "var(--nm-bg)", color: "var(--nm-text)" }}
     >
-      {/* Sidebar pane */}
-      <div className={`h-full w-full md:w-80 md:shrink-0 md:block ${activeChat ? 'hidden' : 'block'}`}>
+      {/* Sidebar pane — width is controlled by Sidebar itself on desktop
+          (resizable, persisted); full-width single pane on mobile */}
+      <div className={`h-full ${activeChat ? "hidden" : "block"} md:block md:shrink-0`}>
         <Sidebar
           onNewChat={() => setShowNewChat(true)}
           onGroups={() => setShowGroups(true)}
+          onSettings={() => navigate("/app/settings")}
         />
       </div>
 

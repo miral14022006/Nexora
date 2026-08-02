@@ -435,3 +435,66 @@ body {
   --font-body: "Inter Variable", "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
 }
+
+/* ================================================================
+   SIDEBAR RESIZE HANDLE (desktop only)
+   ================================================================ */
+
+.sb-resize-handle {
+  position: absolute;
+  inset-block: 0;
+  right: 0;
+  z-index: 20;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 7px;
+  cursor: col-resize;
+}
+
+.sb-resize-bar {
+  width: 2px;
+  height: 44px;
+  border-radius: 9999px;
+  background: var(--nm-divider);
+  transition: width 0.15s ease, background 0.15s ease;
+  pointer-events: none;
+}
+
+.sb-resize-handle:hover .sb-resize-bar,
+.sb-resize-handle:active .sb-resize-bar {
+  width: 4px;
+  background: var(--nm-accent);
+}
+
+@media (min-width: 768px) {
+  .sb-resize-handle {
+    display: flex;
+  }
+}
+
+/* ================================================================
+   "COMING SOON" ICON BUTTON — visible but clearly not live yet
+   ================================================================ */
+
+.nm-icon-btn-soon {
+  opacity: 0.55;
+  color: var(--nm-text-faint);
+}
+
+.nm-icon-btn-soon:hover {
+  opacity: 0.75;
+  color: var(--nm-text-faint);
+}
+
+/* ================================================================
+   MOBILE TOUCH TARGETS — icon buttons get a >=40px tap area even
+   though the visual icon stays the same size
+   ================================================================ */
+
+@media (max-width: 767px) {
+  .nm-icon-btn {
+    min-width: 40px;
+    min-height: 40px;
+  }
+}

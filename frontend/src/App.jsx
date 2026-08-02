@@ -6,6 +6,7 @@ import Landing from "./pages/Landing.jsx";
 import LoginPage from "./pages/LoginPage.jsx";
 import SignupPage from "./pages/SignupPage.jsx";
 import ChatPage from "./pages/ChatPage.jsx";
+import SettingsPage from "./pages/SettingsPage.jsx";
 
 export default function App() {
   const session = useStore((s) => s.session);
@@ -37,6 +38,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/app" element={<ChatPage />} />
+      <Route path="/app/settings" element={<SettingsPage />} />
       <Route path="*" element={<Navigate to="/app" replace />} />
     </Routes>
   );

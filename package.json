@@ -13,6 +13,7 @@
   "workspaces": [
     "services/*",
     "packages/*",
-    "backend"
+    "backend",
+    "frontend"
   ]
 }

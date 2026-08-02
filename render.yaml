@@ -108,10 +108,6 @@ services:
           name: nexora-api-gateway
           type: web
           property: hostport
-        fromService:
-          name: nexora-api-gateway
-          type: web
-          property: hostport
 
   # ── api-gateway (public entry point) ──────────────────────────────────────
   - type: web

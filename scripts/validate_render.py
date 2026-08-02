@@ -25,6 +25,29 @@ except ImportError:  # pragma: no cover
     print("PyYAML is required: pip install pyyaml", file=sys.stderr)
     sys.exit(1)
 
+# Standard YAML parsers silently keep the LAST value for duplicate mapping
+# keys (e.g. a duplicated `fromService`), while Render's Blueprint parser
+# rejects them. Use a loader that errors on duplicates.
+class UniqueKeyLoader(yaml.SafeLoader):
+    pass
+
+
+def _construct_mapping(loader, node, deep=False):
+    mapping = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        if key in mapping:
+            raise yaml.YAMLError(
+                f"duplicate mapping key {key!r} at line {key_node.start_mark.line + 1}"
+            )
+        mapping[key] = loader.construct_object(value_node, deep=deep)
+    return mapping
+
+
+UniqueKeyLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _construct_mapping
+)
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BLUEPRINT = Path(sys.argv[1] if len(sys.argv) > 1 else REPO_ROOT / "render.yaml")
 
@@ -48,7 +71,11 @@ if not BLUEPRINT.exists():
     print(f"FAIL: blueprint not found: {BLUEPRINT}", file=sys.stderr)
     sys.exit(1)
 
-doc = yaml.safe_load(BLUEPRINT.read_text())
+try:
+    doc = yaml.load(BLUEPRINT.read_text(), Loader=UniqueKeyLoader)
+except yaml.YAMLError as e:
+    print(f"FAIL: render.yaml is not valid YAML ({e})", file=sys.stderr)
+    sys.exit(1)
 if not isinstance(doc, dict):
     print("FAIL: render.yaml must contain a mapping at the root", file=sys.stderr)
     sys.exit(1)

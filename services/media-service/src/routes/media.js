@@ -9,6 +9,7 @@ import {
   idParamSchema,
   MEDIA_RULES,
   MEDIA_URL_TTL_SECONDS,
+  mediaTypeOf,
   ruleFor,
   safeFilename,
   UPLOAD_URL_TTL_SECONDS,
@@ -18,7 +19,7 @@ import {
 } from "../validators/media.js";
 
 const SELECT_MEDIA = `
-  SELECT id, owner_id, filename, content_type, size, storage_key, status, created_at
+  SELECT id, owner_id, filename, content_type, media_type, size, storage_key, status, created_at
   FROM media WHERE id = $1`;
 
 function toMedia(row) {
@@ -27,6 +28,7 @@ function toMedia(row) {
     ownerId: row.owner_id,
     filename: row.filename,
     contentType: row.content_type,
+    mediaType: row.media_type,
     size: Number(row.size), // BIGINT arrives as a string
     status: row.status,
     createdAt: row.created_at,
@@ -87,9 +89,9 @@ export function createMediaRouter({ now = Date.now } = {}) {
       const storageKey = `${ownerId}/${mediaId}-${name}`;
 
       await pool.query(
-        `INSERT INTO media (id, owner_id, filename, content_type, size, storage_key)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
-        [mediaId, ownerId, name, content_type, size, storageKey]
+        `INSERT INTO media (id, owner_id, filename, content_type, media_type, size, storage_key)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [mediaId, ownerId, name, content_type, mediaTypeOf(rule.kind), size, storageKey]
       );
 
       // The browser PUTs the file straight to this URL — chat-service never

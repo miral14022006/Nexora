@@ -7,12 +7,17 @@ import { z } from "zod";
  * — see ARCHITECTURE.md "Media Service".)
  */
 export const MEDIA_RULES = [
-  { kind: "image", mimes: ["image/jpeg", "image/png", "image/gif", "image/webp"], maxBytes: 5 * 1024 * 1024 },
+  { kind: "image", mimes: ["image/jpeg", "image/png", "image/gif", "image/webp"], maxBytes: 15 * 1024 * 1024 },
   { kind: "audio", mimes: ["audio/mpeg", "audio/wav", "audio/ogg", "audio/aac", "audio/mp4"], maxBytes: 15 * 1024 * 1024 },
-  { kind: "video", mimes: ["video/mp4", "video/webm"], maxBytes: 25 * 1024 * 1024 },
+  { kind: "video", mimes: ["video/mp4", "video/mov", "video/webm"], maxBytes: 100 * 1024 * 1024 },
   { kind: "document", mimes: ["application/pdf"], maxBytes: 10 * 1024 * 1024 },
   { kind: "text", mimes: ["text/plain", "text/markdown", "text/csv", "application/json"], maxBytes: 2 * 1024 * 1024 },
 ];
+
+/** The stored media_type value for a rule kind (stored, not re-inferred). */
+export function mediaTypeOf(kind) {
+  return kind.toUpperCase(); // IMAGE | VIDEO | AUDIO | DOCUMENT | TEXT
+}
 
 export const UPLOAD_URL_TTL_SECONDS = 60; // presigned PUT
 export const MEDIA_URL_TTL_SECONDS = 600; // signed GET ("CDN-style" delivery)

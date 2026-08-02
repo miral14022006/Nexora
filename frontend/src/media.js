@@ -40,6 +40,22 @@ export function mediaPreview(media) {
   return `[${kind}] ${media.filename}`;
 }
 
+/**
+ * True when the message is only emoji (plus optional whitespace) and short —
+ * such messages render reaction-style: bigger glyph, tighter bubble.
+ * Emoji are unicode code points in the normal TEXT column; this only changes
+ * presentation, never the stored content.
+ */
+const EMOJI_ONLY_RE =
+  /^(?:\p{Extended_Pictographic}(?:\u200d\p{Extended_Pictographic})*|\ufe0f|\u200d|\s)+$/u;
+
+export function isEmojiOnly(content) {
+  if (typeof content !== "string") return false;
+  const trimmed = content.trim();
+  if (!trimmed || trimmed.length > 12) return false;
+  return EMOJI_ONLY_RE.test(trimmed);
+}
+
 // Signed GET URLs are time-limited (10 min); keep a small cache so re-renders
 // don't mint a new URL per frame.
 const signedUrlCache = new Map(); // media_id -> { url, expiresAt }

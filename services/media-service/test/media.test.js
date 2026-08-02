@@ -88,9 +88,47 @@ describe("POST /upload-url", () => {
     const res = await request(app)
       .post("/media/upload-url")
       .set(headers(alice.id))
-      .send({ filename: "huge.jpg", content_type: "image/jpeg", size: 6 * 1024 * 1024 });
+      .send({ filename: "huge.jpg", content_type: "image/jpeg", size: 16 * 1024 * 1024 });
     expect(res.status).toBe(400);
     expect(res.body.error).toBe("File too large");
+  });
+
+  it("accepts a jpeg up to the 15MB image cap", async () => {
+    const res = await request(app)
+      .post("/media/upload-url")
+      .set(headers(alice.id))
+      .send({ filename: "big.png", content_type: "image/png", size: 15 * 1024 * 1024 });
+    expect(res.status).toBe(201);
+  });
+
+  it("accepts mp4/mov/webm up to the 100MB video cap and records VIDEO type", async () => {
+    for (const type of ["video/mp4", "video/mov", "video/webm"]) {
+      const res = await request(app)
+        .post("/media/upload-url")
+        .set(headers(alice.id))
+        .send({ filename: `clip.${type.split("/")[1]}`, content_type: type, size: 100 * 1024 * 1024 });
+      expect(res.status).toBe(201);
+      const row = await pool.query(`SELECT media_type FROM media WHERE id = $1`, [res.body.upload_id]);
+      expect(row.rows[0].media_type).toBe("VIDEO");
+    }
+  });
+
+  it("rejects videos over the 100MB cap", async () => {
+    const res = await request(app)
+      .post("/media/upload-url")
+      .set(headers(alice.id))
+      .send({ filename: "too-big.mov", content_type: "video/mov", size: 101 * 1024 * 1024 });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("File too large");
+  });
+
+  it("records the stored media type explicitly (not re-inferred)", async () => {
+    const res = await request(app)
+      .post("/media/upload-url")
+      .set(headers(alice.id))
+      .send({ filename: "shot.png", content_type: "image/png", size: 512 });
+    const row = await pool.query(`SELECT media_type FROM media WHERE id = $1`, [res.body.upload_id]);
+    expect(row.rows[0].media_type).toBe("IMAGE");
   });
 
   it("rejects negative/zero sizes", async () => {
@@ -286,6 +324,7 @@ describe("signed delivery URLs", () => {
       id,
       filename: "shot.png",
       contentType: "image/png",
+      mediaType: "IMAGE",
       size: 512,
       status: "ready",
       ownerId: alice.id,

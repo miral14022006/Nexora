@@ -2,20 +2,28 @@ import { useEffect, useState } from "react";
 import { cachedSignedUrl, fetchSignedUrl, formatBytes } from "../media.js";
 
 /**
- * Renders the media half of a media message. Images render inline; every other
- * file type renders as a download link with filename + size. The actual bytes
- * always come from a signed, time-limited GET URL minted by the media service
- * ("CDN-style" delivery) — never from a raw storage URL.
+ * Renders the media half of a media message.
+ *  - Images render inline and open a full-size lightbox on tap.
+ *  - Videos render in an inline <video> player with native controls. No
+ *    thumbnail/poster is generated at upload (ffmpeg skipped this pass — see
+ *    ARCHITECTURE.md "Media Service"), so a generic play-icon placeholder
+ *    shows while the signed URL resolves and until playback starts.
+ *  - Every other file type renders as a download link with filename + size.
+ * The actual bytes always come from a signed, time-limited GET URL minted by
+ * the media service ("CDN-style" delivery) — never from a raw storage URL.
  */
 export default function MediaMessage({ media, text }) {
   if (!media) return <p className="whitespace-pre-wrap break-words">{text}</p>;
 
   const isImage = media.content_type?.startsWith("image/");
+  const isVideo = media.content_type?.startsWith("video/");
   return (
     <div className="space-y-1">
       {text && <p className="whitespace-pre-wrap break-words">{text}</p>}
       {isImage ? (
         <MediaImage media={media} />
+      ) : isVideo ? (
+        <MediaVideo media={media} />
       ) : (
         <MediaDownload media={media} />
       )}
@@ -45,34 +53,96 @@ function useSignedUrl(mediaId) {
   return { url, state };
 }
 
+/** Loading/error placeholder with the neomorphic pressed style. */
+function MediaPlaceholder({ label, children }) {
+  return (
+    <div
+      className="nm-pressed flex h-40 w-64 items-center justify-center rounded-2xl text-xs"
+      style={{ color: "var(--nm-text-muted)" }}
+    >
+      {children ?? label}
+    </div>
+  );
+}
+
 function MediaImage({ media }) {
+  const { url, state } = useSignedUrl(media.media_id);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+
+  useEffect(() => {
+    if (!lightboxOpen) return;
+    const onKey = (e) => e.key === "Escape" && setLightboxOpen(false);
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [lightboxOpen]);
+
+  if (state === "loading") return <MediaPlaceholder label="Loading…" />;
+  if (state === "error") {
+    return <MediaPlaceholder label="Failed to load image">
+      <span style={{ color: "var(--nm-error)" }}>Failed to load image</span>
+    </MediaPlaceholder>;
+  }
+
+  return (
+    <>
+      <img
+        src={url}
+        alt={media.filename}
+        onClick={() => setLightboxOpen(true)}
+        className="max-h-72 max-w-full cursor-zoom-in rounded-2xl object-cover"
+        title={media.filename}
+      />
+      {lightboxOpen && (
+        <div
+          onClick={() => setLightboxOpen(false)}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+        >
+          <img
+            src={url}
+            alt={media.filename}
+            className="max-h-full max-w-full rounded-lg object-contain"
+          />
+          <button
+            onClick={() => setLightboxOpen(false)}
+            title="Close"
+            className="absolute top-4 right-4 flex h-10 w-10 items-center justify-center rounded-full bg-black/40 text-white transition hover:bg-black/60"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+      )}
+    </>
+  );
+}
+
+function MediaVideo({ media }) {
   const { url, state } = useSignedUrl(media.media_id);
   if (state === "loading") {
     return (
-      <div
-        className="nm-pressed flex h-32 w-56 items-center justify-center rounded-2xl text-xs"
-        style={{ color: "var(--nm-text-muted)" }}
-      >
-        Loading…
-      </div>
+      <MediaPlaceholder>
+        <span className="flex flex-col items-center gap-2">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor" opacity="0.7">
+            <path d="M8 5v14l11-7z" />
+          </svg>
+          Video
+        </span>
+      </MediaPlaceholder>
     );
   }
   if (state === "error") {
     return (
-      <div
-        className="nm-pressed flex h-32 w-56 items-center justify-center rounded-2xl text-xs"
-        style={{ color: "var(--nm-error)" }}
-      >
-        Failed to load image
-      </div>
+      <MediaPlaceholder>
+        <span style={{ color: "var(--nm-error)" }}>Failed to load video</span>
+      </MediaPlaceholder>
     );
   }
   return (
-    <img
+    <video
       src={url}
-      alt={media.filename}
-      className="max-h-72 max-w-full rounded-2xl object-cover"
-      title={media.filename}
+      controls
+      preload="metadata"
+      playsInline
+      className="max-h-96 max-w-full rounded-2xl"
     />
   );
 }

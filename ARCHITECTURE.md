@@ -364,9 +364,14 @@ PUTs straight to object storage using a pre-signed URL.
 ```
 Composer ──POST /api/media/upload-url──▶ media-service
     │  {filename, content_type, size}     │ 1. validate type + size (MVP allowlist,
-    │                                     │    per-kind caps: image 5MB, audio 15MB,
-    │                                     │    video 25MB, pdf 10MB, text 2MB)
-    │                                     │ 2. INSERT media row (status 'uploading')
+    │                                     │    per-kind caps: image 15MB, audio 15MB,
+    │                                     │    video 100MB, pdf 10MB, text 2MB;
+    │                                     │    video: mp4/mov/webm, image: jpeg/png/
+    │                                     │    gif/webp)
+    │                                     │ 2. INSERT media row (status 'uploading',
+    │                                     │    media_type stored explicitly as
+    │                                     │    IMAGE/VIDEO/... — never re-inferred
+    │                                     │    from the MIME at render time)
     │                                     │ 3. presign PUT (60s, 1 object = 1 UUID)
     │  ◀── 201 {upload_id, upload_url} ───┘
     │
@@ -385,6 +390,13 @@ Composer ──POST /api/media/upload-url──▶ media-service
   message that references it. Message content stays tiny (a JSON envelope);
   deleting the sender's account cascades the row (objects are cleaned by the
   service on cancel; orphaned-object GC is a noted gap).
+- **Video is first-class**: videos upload through the exact same pre-signed
+  path as images (client claim → PUT → confirm) and are delivered through
+  signed GET URLs — chat servers never proxy file bytes. The 100MB cap is the
+  limit actually enforced in `validators/media.js`; lower it there if the
+  MinIO instance is storage-constrained. The frontend renders videos with a
+  native `<video controls>` player (no custom player), images inline with a
+  tap-to-open full-size lightbox.
 - Two MinIO endpoints are configured: the internal DNS name for
   server-side operations and the browser-reachable host (`localhost` for the
   demo) embedded in presigned URLs — S3 v4 signatures bind the host, so the
@@ -401,9 +413,23 @@ Recipient UI ──GET /api/media/:id/url──▶ media-service
     ◀── {get_url, expires_in} ──▶ <img src={get_url}> / download link
 ```
 
-Images render inline; everything else renders as a download link with
-filename + size. The frontend caches signed URLs per media id and re-mints
-only on expiry.
+Images render inline (tap opens a full-size lightbox); videos render in an
+inline native `<video>` player; everything else renders as a download link
+with filename + size. The frontend caches signed URLs per media id and
+re-mints only on expiry.
+
+### Emoji
+
+Emoji need no backend support — they are plain unicode code points in the
+normal `content` TEXT column (the chat-service validator is a plain string
+check with no character-set restriction, so nothing strips or rejects them).
+The composer's emoji button opens a real picker using
+**`emoji-picker-react`** (v4, `frontend/package.json`); picking an emoji
+inserts it at the caret position in the textarea. Messages that are
+emoji-only (detected client-side with a unicode regex, presentation only)
+render reaction-style: larger glyph, tighter neomorphic bubble, timestamp
+badge — consistent across light and dark mode since the browser renders the
+emoji itself.
 
 ### Simplifications for the demo (explicitly out of scope)
 
@@ -416,8 +442,13 @@ only on expiry.
   enforced on the client's *claim* (content_type + size) at issuance and
   against the actual object size at confirm, but the bytes are not inspected.
   **Noted gap, not implemented.**
-- **No thumbnail generation** — images render at full size; the media
-  envelope has a `thumbnail` slot for later.
+- **No video thumbnail generation (this pass)** — ffmpeg is not present in
+  the media-service image, so no poster frame is extracted on upload. Videos
+  show a generic play-icon placeholder until the signed URL resolves, then a
+  native `<video controls>` player (browsers render the first frame once
+  metadata loads). The media envelope/table has no thumbnail slot wired up;
+  adding one later means ffmpeg in the Dockerfile, a poster object in
+  storage, and a `poster` attribute on the player.
 - **Coarse download ACL** — any authenticated user can mint a signed URL;
   media ids are unguessable UUIDs and URLs expire in 10 minutes. Restricting
   minting to conversation participants is the production design (checked in

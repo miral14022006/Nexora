@@ -280,95 +280,40 @@ nexora/
 
 ## Deploy to Render
 
-Nexora ships with a [`render.yaml`](render.yaml) **Infrastructure-as-Code blueprint** that defines every service, database, and environment group needed for a production deployment on [Render](https://render.com). This section walks through the full setup.
+Nexora ships as a single Infrastructure-as-Code blueprint — [`render.yaml`](render.yaml) — that provisions the whole platform on Render in one click: frontend, API gateway, 9 private backend services, managed Postgres, managed Redis, and secret env groups. Kafka (Upstash) and S3-compatible storage are the only external pieces, wired in with credentials after deploy.
 
-### Prerequisites
+**Full walkthrough: [`DEPLOY_RENDER.md`](DEPLOY_RENDER.md)**
 
-| What                | Why                                                                 |
-|---------------------|---------------------------------------------------------------------|
-| **Render account**  | Free or paid — [render.com/register](https://render.com/register)   |
-| **GitHub repo**     | Push this repo to GitHub; Render deploys from Git                   |
-| **Upstash Kafka**   | Managed Kafka (free tier) — Render has no built-in Kafka offering   |
-| **S3-compatible store** *(optional)* | For `media-service` (AWS S3 free tier, Cloudflare R2, etc.)  |
+### Quick start
 
-### Step 1 — Provision external Kafka (Upstash)
+1. Provision [Upstash Kafka](https://upstash.com/kafka) (topics: `message-events`, `chat.message.delivered`, `chat.message.read`, `message-events-dlq`) and — optionally — an S3-compatible bucket.
+2. Deploy the blueprint: Render Dashboard → **New Blueprint Instance** → select this repo (or the one-click button in `DEPLOY_RENDER.md`).
+3. Paste the Upstash/S3 credentials into the `sync: false` prompts; everything else is auto-wired (`fromDatabase`/`fromService`/`generateValue`).
 
-Render has no managed Kafka. [Upstash Kafka](https://upstash.com/kafka) is the simplest option: HTTP-based, free tier, no VPC peering needed.
+### Architecture on Render
 
-1. Go to [console.upstash.com](https://console.upstash.com) → **Create Kafka Cluster**
-2. Pick a region close to your Render region (e.g. `us-east-1` for Oregon)
-3. Create the required topics:
+```
+Browser → nexora-frontend (web/nginx) → /api + /ws → nexora-api-gateway (web)
+                                                        → 9× pserv (auth, user, group, chat, delivery,
+                                                           presence, notification, media, websocket-gateway)
+                                                        → nexora-postgres + nexora-redis (managed, internal)
+```
 
-   | Topic                      | Partitions |
-   |----------------------------|------------|
-   | `message-events`           | 3          |
-   | `chat.message.delivered`   | 1          |
-   | `chat.message.read`        | 1          |
-   | `message-events-dlq`       | 1          |
+- Only the **frontend** and **api-gateway** are public (`type: web`); everything else is a private service (`pserv`) reachable only over Render's internal network.
+- `fromService hostport` injects bare `host:port` values; the api-gateway's `config.js` adds the scheme automatically (compose injects full URLs — one config, both environments).
+- The frontend's nginx proxies relative `/api` + `/ws` to the gateway (`API_GATEWAY_UPSTREAM`, injected at boot), so no `VITE_API_BASE_URL` is needed by default.
+- All services boot concurrently and retry DB/Redis connections at startup, so provisioning order never matters.
 
-4. Copy these credentials — you'll paste them into the Render Dashboard:
-   - **Bootstrap endpoint** (e.g. `grizzly-1234-us1-kafka.upstash.io:9092`) → `KAFKA_BROKERS`
-   - **SASL username** → `KAFKA_SASL_USERNAME`
-   - **SASL password** → `KAFKA_SASL_PASSWORD`
+### Environment variables: auto-wired vs manual
 
-> **How it works:** The `kafkajs` client in `chat-service`, `delivery-service`, and `notification-service` detects `KAFKA_SASL_USERNAME` at startup. When set, it enables SASL/SCRAM-256 + TLS automatically. When unset (local dev), it connects via plain TCP to the Docker Kafka container — zero code changes needed.
-
-### Step 2 — Deploy the blueprint
-
-#### Option A — One-click deploy
-
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/miral14022006/Nexora)
-
-#### Option B — Manual setup
-
-1. Go to your [Render Dashboard](https://dashboard.render.com) → **Blueprints** → **New Blueprint Instance**
-2. Connect your GitHub repo containing this project
-3. Select the `render.yaml` file (auto-detected at the repo root)
-4. Render will prompt you for `sync: false` values — fill in:
-   - `KAFKA_BROKERS`, `KAFKA_SASL_USERNAME`, `KAFKA_SASL_PASSWORD` (from Upstash)
-   - `MINIO_*` values (if using media-service; otherwise leave blank)
-   - `VITE_API_BASE_URL` — set this **after** the api-gateway deploys (see Step 3)
-
-### Step 3 — Wire the frontend API URL
-
-After the api-gateway deploys and gets its public Render URL (e.g. `https://api-gateway-xxxx.onrender.com`):
-
-1. Go to the **nexora-frontend** service in the Render Dashboard
-2. Set `VITE_API_BASE_URL` = `https://api-gateway-xxxx.onrender.com`
-3. Trigger a redeploy of the frontend (it's a build-time variable)
-
-### Deployment order
-
-The blueprint handles dependency ordering automatically, but if services boot simultaneously:
-
-1. **Databases first** — `nexora-db` (Postgres) and `nexora-redis` (Key Value) provision first
-2. **Backend services next** — all 10 services build from their Dockerfiles
-3. **Frontend last** — needs the api-gateway URL to be known at build time
-
-### How cross-service networking works on Render
-
-On Docker Compose, services reach each other via Docker network DNS (e.g. `http://auth-service:3001`). On Render, the architecture is equivalent:
-
-- **Private services** (`type: pserv`) are internal-only — not exposed to the internet
-- Services in the **same Render account and region** communicate via Render's internal network
-- The `render.yaml` uses `fromService` references to automatically inject the correct internal hostnames
-- Only `api-gateway` and `websocket-gateway` are public (`type: web`) — they're the only entry points, matching the Docker Compose design
-
-### Environment variables — auto-wired vs manual
-
-| Variable | Auto-wired by blueprint? | Notes |
-|----------|--------------------------|-------|
-| `DATABASE_URL` | ✅ `fromDatabase` | Render injects the Postgres connection string |
-| `REDIS_URL` | ✅ `fromService` (keyvalue) | Render injects the Key Value connection string |
-| `JWT_ACCESS_SECRET` | ✅ `generateValue` | Render generates a secure random value |
-| `JWT_REFRESH_SECRET` | ✅ `generateValue` | Same |
-| `SERVICE_SECRET` | ✅ `generateValue` | Same |
-| `AUTH_SERVICE_URL` etc. | ✅ `fromService` | Render resolves internal hostnames |
-| `KAFKA_BROKERS` | ❌ **Manual** | Paste from Upstash |
-| `KAFKA_SASL_USERNAME` | ❌ **Manual** | Paste from Upstash |
-| `KAFKA_SASL_PASSWORD` | ❌ **Manual** | Paste from Upstash |
-| `MINIO_*` | ❌ **Manual** | Your S3-compatible store credentials |
-| `VITE_API_BASE_URL` | ❌ **Manual** | api-gateway's public Render URL |
+| Variable | Source |
+|----------|--------|
+| `DATABASE_URL`, `REDIS_URL` | ✅ auto (`fromDatabase` / `fromService`) |
+| `JWT_*`, `SERVICE_SECRET`, `BCRYPT_ROUNDS`, `NODE_ENV` | ✅ auto (`generateValue` + env group) |
+| `AUTH_SERVICE_URL` … `MEDIA_SERVICE_URL`, `WS_GATEWAY_URLS`, `GATEWAY_HTTP_URL` | ✅ auto (`fromService hostport`) |
+| `KAFKA_BROKERS`, `KAFKA_SASL_*` | ❌ manual (Upstash credentials) |
+| `MINIO_*` | ❌ manual (S3 credentials; leave blank to run without media — media routes return 503) |
+| `VITE_API_BASE_URL` | ⏭️ optional (relative-path proxying works by default) |
 
 ### Verifying the deployment
 
@@ -377,27 +322,14 @@ On Docker Compose, services reach each other via Docker network DNS (e.g. `http:
 curl https://api-gateway-xxxx.onrender.com/health
 # → {"status":"ok"}
 
-# Auth — sign up and get tokens
+# Sign up through the public gateway
 curl -X POST https://api-gateway-xxxx.onrender.com/api/auth/signup \
   -H "Content-Type: application/json" \
   -d '{"username":"test","password":"testtest"}'
 ```
 
-### Scaling on Render
+### Free tier notes
 
-Instead of `docker compose up --scale`, Render uses `numInstances` in the blueprint or the Dashboard:
-
-```yaml
-# In render.yaml, under any service:
-numInstances: 2  # or use autoscaling:
-scaling:
-  minInstances: 1
-  maxInstances: 3
-  targetCPUPercent: 70
-```
-
-### Free tier limitations
-
-- Free-tier services **spin down after 15 minutes** of inactivity — incompatible with WebSocket connections and Kafka consumers
-- For a stable deployment, use at least **Starter** plan ($7/service/month) for `api-gateway`, `websocket-gateway`, `delivery-service`, and `notification-service`
-- Free-tier Postgres has a 90-day expiry; free Key Value has no persistence
+- Free pservs are **not available** on Render — the blueprint uses **starter** for all services.
+- Free Postgres expires after 30 days; free Key Value has no persistence. Swap to `basic-256mb` / `journal-snapshot` for production.
+- Free web services spin down after 15 min of inactivity — this kills WebSocket sessions and Kafka consumers; keep services on starter for a stable deployment.

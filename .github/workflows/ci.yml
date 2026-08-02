@@ -1,0 +1,147 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "22"
+
+jobs:
+  # ─── Static checks: lint + Blueprint validation ────────────────────────────
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Lint (syntax, Dockerfiles, env docs)
+        run: npm run lint
+
+      - name: Validate render.yaml (structural invariants)
+        run: |
+          python3 -m pip install --user pyyaml --quiet
+          npm run validate:render
+
+  # ─── Full test suite: real Postgres + Redis + Kafka + MinIO ───────────────
+  # Mirrors the docker-compose dev stack (minus the services themselves, which
+  # are exercised as in-process units + live gateway instances).
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: nexora
+          POSTGRES_PASSWORD: nexora
+          POSTGRES_DB: nexora
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U nexora"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      kafka:
+        image: apache/kafka:3.7.0
+        ports: ["19092:9092"]
+        env:
+          KAFKA_NODE_ID: "1"
+          KAFKA_CLUSTER_ID: nexora-ci-cluster-001
+          KAFKA_PROCESS_ROLES: broker,controller
+          KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+          KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+          KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:19092
+          KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+          KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+          KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+          KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+          KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+        options: >-
+          --health-cmd "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list"
+          --health-interval 10s
+          --health-timeout 10s
+          --health-retries 20
+          --health-start-period 20s
+
+      minio:
+        image: quay.io/minio/minio
+        command: server /data --console-address ":9001"
+        env:
+          MINIO_ROOT_USER: nexora
+          MINIO_ROOT_PASSWORD: nexora-minio-secret
+        ports: ["19000:9000"]
+
+    env:
+      DATABASE_URL: postgres://nexora:nexora@localhost:5432/nexora
+      REDIS_URL: redis://localhost:6379
+      KAFKA_BROKERS: localhost:19092
+      INSTANCE_2_URL: ws://localhost:3009/ws
+      JWT_ACCESS_SECRET: dev-only-access-secret
+      SERVICE_SECRET: dev-internal-secret
+      MINIO_INTERNAL_ENDPOINT: localhost
+      MINIO_PUBLIC_ENDPOINT: localhost
+      MINIO_PORT: "19000"
+      MINIO_USE_SSL: "false"
+      MINIO_ACCESS_KEY: nexora
+      MINIO_SECRET_KEY: nexora-minio-secret
+      MINIO_BUCKET: nexora-media
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Create Kafka topics (idempotent, retries until broker is up)
+        run: node scripts/create-topics.mjs
+
+      # The websocket-gateway scaling test connects to TWO live instances.
+      - name: Start websocket-gateway instances (3008 + 3009)
+        run: |
+          (cd services/websocket-gateway && PORT=3008 node src/index.js > /tmp/ws1.log 2>&1 &)
+          (cd services/websocket-gateway && PORT=3009 node src/index.js > /tmp/ws2.log 2>&1 &)
+          for i in $(seq 1 30); do
+            curl -fsS http://localhost:3008/health >/dev/null 2>&1 && \
+            curl -fsS http://localhost:3009/health >/dev/null 2>&1 && break
+            sleep 1
+          done
+          curl -fsS http://localhost:3008/health >/dev/null || { cat /tmp/ws1.log; exit 1; }
+          curl -fsS http://localhost:3009/health >/dev/null || { cat /tmp/ws2.log; exit 1; }
+
+      - name: Run all workspace tests
+        run: npm --workspaces --if-present test
+
+  # ─── Docker builds: every image from render.yaml must compile ──────────────
+  docker-builds:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build all 11 production images
+        run: node scripts/build-images.mjs

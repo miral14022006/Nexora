@@ -35,6 +35,15 @@ function toMedia(row) {
 
 export function createMediaRouter({ now = Date.now } = {}) {
   const router = Router();
+
+  // When object storage is not configured (no MINIO_INTERNAL_ENDPOINT), the
+  // service boots but every media operation is unavailable. Short-circuit
+  // before auth so the 503 is explicit, not a misleading 403.
+  router.use((req, res, next) => {
+    if (config.minio.enabled) return next();
+    res.status(503).json({ error: "Object storage is not configured" });
+  });
+
   router.use(gatewayOnly);
 
   // ------------------------------------------------------------------ upload

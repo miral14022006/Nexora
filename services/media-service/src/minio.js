@@ -21,10 +21,22 @@ function buildClient(endPoint) {
   });
 }
 
-export const internalClient = buildClient(config.minio.endPoint);
-export const publicClient = buildClient(config.minio.publicEndPoint);
+// When object storage is not configured, both clients are null and the
+// routes short-circuit with 503 (see routes/media.js).
+export const internalClient = config.minio.enabled
+  ? buildClient(config.minio.endPoint)
+  : null;
+export const publicClient = config.minio.enabled
+  ? buildClient(config.minio.publicEndPoint)
+  : null;
 
 export async function ensureBucket() {
+  if (!config.minio.enabled) {
+    console.warn(
+      `[${config.serviceName}] object storage not configured — skipping bucket setup`
+    );
+    return;
+  }
   const exists = await internalClient.bucketExists(config.minio.bucket);
   if (!exists) {
     await internalClient.makeBucket(config.minio.bucket);

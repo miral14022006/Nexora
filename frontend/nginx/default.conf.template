@@ -1,0 +1,44 @@
+server {
+    listen 80;
+    server_name _;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # Render health check
+    location = /health {
+        default_type application/json;
+        return 200 '{"status":"ok"}';
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # API fallback proxy: used when VITE_API_BASE_URL is empty (relative /api
+    # paths). API_GATEWAY_UPSTREAM is rendered at container start by the
+    # nginx envsubst entrypoint (Render fromService hostport / compose DNS,
+    # e.g. "api-gateway-3k2j:3000"). The $gateway_upstream variable makes
+    # nginx resolve the hostname per request instead of at config load, so a
+    # not-yet-provisioned service can't block the container from starting.
+    location /api/ {
+        set $gateway_upstream http://${API_GATEWAY_UPSTREAM};
+        proxy_pass $gateway_upstream;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # WebSocket upgrade: frontend -> api-gateway -> websocket-gateway
+    location /ws {
+        set $gateway_upstream http://${API_GATEWAY_UPSTREAM};
+        proxy_pass $gateway_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+}

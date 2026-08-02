@@ -1,3 +1,9 @@
+// Object storage is optional at boot: when MINIO_INTERNAL_ENDPOINT is not
+// set (e.g. a Render blueprint deployed before S3 credentials were filled in),
+// the service starts normally and media endpoints return 503 instead of
+// crashing the whole service.
+const storageConfigured = Boolean(process.env.MINIO_INTERNAL_ENDPOINT);
+
 export const config = {
   port: Number(process.env.PORT ?? 3010),
   serviceName: process.env.SERVICE_NAME ?? "media-service",
@@ -5,6 +11,7 @@ export const config = {
     process.env.DATABASE_URL ??
     "postgres://nexora:nexora@localhost:5432/nexora",
   minio: {
+    enabled: storageConfigured,
     // Internal endpoint: how this service reaches MinIO (compose network DNS).
     // The SAME bucket is reachable from the browser via the published port,
     // which is what the presigned URLs point at (see MINIO_PUBLIC_ENDPOINT).

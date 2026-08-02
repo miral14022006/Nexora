@@ -4,7 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "echo '❌ ERROR: This is a monorepo root — individual services must be deployed via their own Dockerfiles. If you see this on Render, switch the service Environment to Docker (not Node) or deploy via the render.yaml Blueprint. See README.md → Deploy to Render.' && exit 1"
+    "start": "echo 'ERROR: This is a monorepo root - deploy via render.yaml (Blueprint) instead. See DEPLOY_RENDER.md.' && exit 1",
+    "lint": "node scripts/lint.mjs",
+    "validate:render": "python3 scripts/validate_render.py",
+    "test": "npm run lint && npm run validate:render && npm --workspaces --if-present test",
+    "build:images": "node scripts/build-images.mjs"
   },
   "workspaces": [
     "services/*",

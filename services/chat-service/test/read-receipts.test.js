@@ -22,20 +22,24 @@ const app = createApp({
 
 let alice, bob, carol, groupId;
 
+// messages.sequence_no has no DB default (chat-service assigns it), so test
+// fixtures supply a monotonic value.
+let seq = 0;
+
 async function insertDirectMessage(senderId, recipientId, content = "read me") {
   const res = await pool.query(
-    `INSERT INTO messages (type, sender_id, recipient_id, content)
-     VALUES ('DIRECT', $1, $2, $3) RETURNING id, type, sender_id, recipient_id, group_id`,
-    [senderId, recipientId, content]
+    `INSERT INTO messages (type, sender_id, recipient_id, content, sequence_no)
+     VALUES ('DIRECT', $1, $2, $3, $4) RETURNING id, type, sender_id, recipient_id, group_id`,
+    [senderId, recipientId, content, ++seq]
   );
   return res.rows[0];
 }
 
 async function insertGroupMessage(senderId, content = "group read me") {
   const res = await pool.query(
-    `INSERT INTO messages (type, sender_id, group_id, content)
-     VALUES ('GROUP', $1, $2, $3) RETURNING id, type, sender_id, recipient_id, group_id`,
-    [senderId, groupId, content]
+    `INSERT INTO messages (type, sender_id, group_id, content, sequence_no)
+     VALUES ('GROUP', $1, $2, $3, $4) RETURNING id, type, sender_id, recipient_id, group_id`,
+    [senderId, groupId, content, ++seq]
   );
   return res.rows[0];
 }

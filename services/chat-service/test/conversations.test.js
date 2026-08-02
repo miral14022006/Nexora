@@ -18,12 +18,16 @@ const app = createApp({
 
 let alice, bob, carol, groupId;
 
+// messages.sequence_no has no DB default (chat-service assigns it), so test
+// fixtures supply a monotonic value.
+let seq = 0;
+
 async function send(type, senderId, recipientId, groupId, content, createdAt) {
   const result = await pool.query(
-    `INSERT INTO messages (type, sender_id, recipient_id, group_id, content, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6)
+    `INSERT INTO messages (type, sender_id, recipient_id, group_id, content, sequence_no, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
      RETURNING id, sender_id, recipient_id, group_id, content, created_at`,
-    [type, senderId, recipientId ?? null, groupId ?? null, content, createdAt]
+    [type, senderId, recipientId ?? null, groupId ?? null, content, ++seq, createdAt]
   );
   return result.rows[0];
 }

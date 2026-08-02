@@ -7,7 +7,10 @@ import { connectRedis, redis, presenceKey } from "../src/redis.js";
 
 const SECRET = process.env.JWT_ACCESS_SECRET ?? "dev-only-access-secret";
 const INSTANCE_1 = `ws://localhost:${process.env.PORT ?? 3008}/ws`;
-const INSTANCE_2 = `ws://websocket-gateway-2:3009/ws`;
+// Instance 2 is the compose scale-out proof. Overridable so CI can point it
+// at a second gateway published on a host port.
+const INSTANCE_2 =
+  process.env.INSTANCE_2_URL ?? "ws://websocket-gateway-2:3009/ws";
 
 const signToken = (userId, username) =>
   jwt.sign({ userId, username }, SECRET, { expiresIn: "15m" });
@@ -52,15 +55,6 @@ async function waitFor(messages, predicate, timeoutMs = 5000) {
   throw new Error("timeout waiting for message: " + JSON.stringify(messages));
 }
 
-async function insertMessage(senderId, recipientId, content, createdAt) {
-  const res = await pool.query(
-    `INSERT INTO messages (type, sender_id, recipient_id, content, created_at)
-     VALUES ('DIRECT', $1, $2, $3, $4) RETURNING *`,
-    [senderId, recipientId, content, createdAt ?? new Date()]
-  );
-  return res.rows[0];
-}
-
 async function insertStatus(messageId, userId, status) {
   await pool.query(
     `INSERT INTO message_status (message_id, user_id, status)
@@ -70,6 +64,19 @@ async function insertStatus(messageId, userId, status) {
 }
 
 let alice, bob;
+
+// messages.sequence_no is a global monotonic ingest order column with no DB
+// default (chat-service assigns it on insert), so tests must supply it.
+let sequenceCounter = Date.now();
+
+async function insertMessage(senderId, recipientId, content, createdAt) {
+  const res = await pool.query(
+    `INSERT INTO messages (type, sender_id, recipient_id, content, sequence_no, created_at)
+     VALUES ('DIRECT', $1, $2, $3, $4, $5) RETURNING *`,
+    [senderId, recipientId, content, ++sequenceCounter, createdAt ?? new Date()]
+  );
+  return res.rows[0];
+}
 
 beforeAll(async () => {
   await initDb();

@@ -37,10 +37,12 @@ const eventFor = (overrides = {}) => ({
 });
 
 // Mirrors chat-service: the message row exists before the event is consumed.
+// messages.sequence_no has no DB default, so fixtures supply it.
+let seq = 0;
 async function insertMessage(event) {
   await pool.query(
-    `INSERT INTO messages (id, type, sender_id, recipient_id, group_id, content)
-     VALUES ($1, $2, $3, $4, $5, $6)`,
+    `INSERT INTO messages (id, type, sender_id, recipient_id, group_id, content, sequence_no)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
     [
       event.messageId,
       event.type,
@@ -48,6 +50,7 @@ async function insertMessage(event) {
       event.recipientId,
       event.groupId,
       event.content,
+      ++seq,
     ]
   );
 }
@@ -244,9 +247,9 @@ describe("handleReceipt (gateway receipts)", () => {
   it("delivered receipt: PENDING → DELIVERED + chat.message.delivered event", async () => {
     const event = eventFor({ senderId: alice.id, recipientId: bob.id });
     await pool.query(
-      `INSERT INTO messages (id, type, sender_id, recipient_id, content)
-       VALUES ($1, 'DIRECT', $2, $3, $4)`,
-      [event.messageId, alice.id, bob.id, event.content]
+      `INSERT INTO messages (id, type, sender_id, recipient_id, content, sequence_no)
+       VALUES ($1, 'DIRECT', $2, $3, $4, $5)`,
+      [event.messageId, alice.id, bob.id, event.content, ++seq]
     );
     await pool.query(
       `INSERT INTO message_status (message_id, user_id, status) VALUES ($1, $2, 'PENDING')`,
@@ -272,9 +275,9 @@ describe("handleReceipt (gateway receipts)", () => {
   it("read receipt: DELIVERED → READ + chat.message.read event", async () => {
     const event = eventFor({ senderId: alice.id, recipientId: bob.id });
     await pool.query(
-      `INSERT INTO messages (id, type, sender_id, recipient_id, content)
-       VALUES ($1, 'DIRECT', $2, $3, $4)`,
-      [event.messageId, alice.id, bob.id, event.content]
+      `INSERT INTO messages (id, type, sender_id, recipient_id, content, sequence_no)
+       VALUES ($1, 'DIRECT', $2, $3, $4, $5)`,
+      [event.messageId, alice.id, bob.id, event.content, ++seq]
     );
     await pool.query(
       `INSERT INTO message_status (message_id, user_id, status) VALUES ($1, $2, 'DELIVERED')`,
@@ -294,9 +297,9 @@ describe("handleReceipt (gateway receipts)", () => {
   it("delivered receipt never downgrades a READ row (and emits no live tick)", async () => {
     const event = eventFor({ senderId: alice.id, recipientId: bob.id });
     await pool.query(
-      `INSERT INTO messages (id, type, sender_id, recipient_id, content)
-       VALUES ($1, 'DIRECT', $2, $3, $4)`,
-      [event.messageId, alice.id, bob.id, event.content]
+      `INSERT INTO messages (id, type, sender_id, recipient_id, content, sequence_no)
+       VALUES ($1, 'DIRECT', $2, $3, $4, $5)`,
+      [event.messageId, alice.id, bob.id, event.content, ++seq]
     );
     await pool.query(
       `INSERT INTO message_status (message_id, user_id, status) VALUES ($1, $2, 'READ')`,
@@ -328,9 +331,9 @@ describe("handleReceipt (gateway receipts)", () => {
   it("read receipt on a PENDING row jumps straight to READ (forward-only rank)", async () => {
     const event = eventFor({ senderId: alice.id, recipientId: bob.id });
     await pool.query(
-      `INSERT INTO messages (id, type, sender_id, recipient_id, content)
-       VALUES ($1, 'DIRECT', $2, $3, $4)`,
-      [event.messageId, alice.id, bob.id, event.content]
+      `INSERT INTO messages (id, type, sender_id, recipient_id, content, sequence_no)
+       VALUES ($1, 'DIRECT', $2, $3, $4, $5)`,
+      [event.messageId, alice.id, bob.id, event.content, ++seq]
     );
     await pool.query(
       `INSERT INTO message_status (message_id, user_id, status) VALUES ($1, $2, 'PENDING')`,
@@ -352,9 +355,9 @@ describe("handleReceipt (gateway receipts)", () => {
   it("duplicate delivered receipts are idempotent", async () => {
     const event = eventFor({ senderId: alice.id, recipientId: bob.id });
     await pool.query(
-      `INSERT INTO messages (id, type, sender_id, recipient_id, content)
-       VALUES ($1, 'DIRECT', $2, $3, $4)`,
-      [event.messageId, alice.id, bob.id, event.content]
+      `INSERT INTO messages (id, type, sender_id, recipient_id, content, sequence_no)
+       VALUES ($1, 'DIRECT', $2, $3, $4, $5)`,
+      [event.messageId, alice.id, bob.id, event.content, ++seq]
     );
     await pool.query(
       `INSERT INTO message_status (message_id, user_id, status) VALUES ($1, $2, 'PENDING')`,
@@ -378,9 +381,9 @@ describe("handleReceipt live delivery ticks", () => {
     const aliceChannel = await subscribeDeliverInTest(alice.id);
     const event = eventFor({ senderId: alice.id, recipientId: bob.id });
     await pool.query(
-      `INSERT INTO messages (id, type, sender_id, recipient_id, content)
-       VALUES ($1, 'DIRECT', $2, $3, $4)`,
-      [event.messageId, alice.id, bob.id, event.content]
+      `INSERT INTO messages (id, type, sender_id, recipient_id, content, sequence_no)
+       VALUES ($1, 'DIRECT', $2, $3, $4, $5)`,
+      [event.messageId, alice.id, bob.id, event.content, ++seq]
     );
     await pool.query(
       `INSERT INTO message_status (message_id, user_id, status) VALUES ($1, $2, 'DELIVERED')`,
@@ -419,9 +422,9 @@ describe("handleReceipt live delivery ticks", () => {
       content: "group read test",
     });
     await pool.query(
-      `INSERT INTO messages (id, type, sender_id, recipient_id, group_id, content)
-       VALUES ($1, 'GROUP', $2, NULL, $3, $4)`,
-      [event.messageId, alice.id, groupId, event.content]
+      `INSERT INTO messages (id, type, sender_id, recipient_id, group_id, content, sequence_no)
+       VALUES ($1, 'GROUP', $2, NULL, $3, $4, $5)`,
+      [event.messageId, alice.id, groupId, event.content, ++seq]
     );
     await pool.query(
       `INSERT INTO message_status (message_id, user_id, status)

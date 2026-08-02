@@ -170,7 +170,7 @@ async function main() {
     console.log("[unified-backend] MinIO not configured — media routes will 503");
   }
 
-  // ── 5. Start downstream HTTP services ───────────────────────────────────
+  // ── 5. Start downstream HTTP services (bound to localhost 127.0.0.1) ────
   console.log("[unified-backend] Starting downstream services...");
 
   // Auth service
@@ -178,8 +178,8 @@ async function main() {
     "../services/auth-service/src/app.js"
   );
   const authApp = createAuthApp();
-  authApp.listen(INTERNAL_PORTS.auth, () =>
-    console.log(`[unified-backend]   auth-service       → :${INTERNAL_PORTS.auth}`)
+  authApp.listen(INTERNAL_PORTS.auth, "127.0.0.1", () =>
+    console.log(`[unified-backend]   auth-service       → 127.0.0.1:${INTERNAL_PORTS.auth}`)
   );
 
   // User service
@@ -187,8 +187,8 @@ async function main() {
     "../services/user-service/src/app.js"
   );
   const userApp = createUserApp();
-  userApp.listen(INTERNAL_PORTS.user, () =>
-    console.log(`[unified-backend]   user-service       → :${INTERNAL_PORTS.user}`)
+  userApp.listen(INTERNAL_PORTS.user, "127.0.0.1", () =>
+    console.log(`[unified-backend]   user-service       → 127.0.0.1:${INTERNAL_PORTS.user}`)
   );
 
   // Group service
@@ -196,8 +196,8 @@ async function main() {
     "../services/group-service/src/app.js"
   );
   const groupApp = createGroupApp();
-  groupApp.listen(INTERNAL_PORTS.group, () =>
-    console.log(`[unified-backend]   group-service      → :${INTERNAL_PORTS.group}`)
+  groupApp.listen(INTERNAL_PORTS.group, "127.0.0.1", () =>
+    console.log(`[unified-backend]   group-service      → 127.0.0.1:${INTERNAL_PORTS.group}`)
   );
 
   // Chat service (needs Kafka publisher + Redis read-receipt publisher)
@@ -211,8 +211,8 @@ async function main() {
     "../services/chat-service/src/app.js"
   );
   const chatApp = createChatApp({ publishMessageEvent, publishReadReceipt });
-  chatApp.listen(INTERNAL_PORTS.chat, () =>
-    console.log(`[unified-backend]   chat-service       → :${INTERNAL_PORTS.chat}`)
+  chatApp.listen(INTERNAL_PORTS.chat, "127.0.0.1", () =>
+    console.log(`[unified-backend]   chat-service       → 127.0.0.1:${INTERNAL_PORTS.chat}`)
   );
 
   // Media service
@@ -220,8 +220,8 @@ async function main() {
     "../services/media-service/src/app.js"
   );
   const mediaApp = createMediaApp();
-  mediaApp.listen(INTERNAL_PORTS.media, () =>
-    console.log(`[unified-backend]   media-service      → :${INTERNAL_PORTS.media}`)
+  mediaApp.listen(INTERNAL_PORTS.media, "127.0.0.1", () =>
+    console.log(`[unified-backend]   media-service      → 127.0.0.1:${INTERNAL_PORTS.media}`)
   );
 
   // ── 6. Start WebSocket Gateway ──────────────────────────────────────────
@@ -229,9 +229,9 @@ async function main() {
     "../services/websocket-gateway/src/server.js"
   );
   const wsServer = createWsServer();
-  wsServer.listen(INTERNAL_PORTS.websocketGateway, () =>
+  wsServer.listen(INTERNAL_PORTS.websocketGateway, "127.0.0.1", () =>
     console.log(
-      `[unified-backend]   websocket-gateway  → :${INTERNAL_PORTS.websocketGateway}`
+      `[unified-backend]   websocket-gateway  → 127.0.0.1:${INTERNAL_PORTS.websocketGateway}`
     )
   );
 
@@ -339,10 +339,10 @@ async function main() {
   const gatewayServer = http.createServer(gatewayApp);
   gatewayApp.attachWs(gatewayServer);
 
-  gatewayServer.listen(gatewayPort, () => {
+  gatewayServer.listen(gatewayPort, "0.0.0.0", () => {
     console.log("[unified-backend] ═══════════════════════════════════════");
     console.log(
-      `[unified-backend]  API Gateway (public) → :${gatewayPort}`
+      `[unified-backend]  API Gateway (public) → 0.0.0.0:${gatewayPort}`
     );
     console.log("[unified-backend]  All services running ✓");
     console.log("[unified-backend] ═══════════════════════════════════════");

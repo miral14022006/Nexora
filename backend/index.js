@@ -225,101 +225,7 @@ async function main() {
     )
   );
 
-  // ── 7. Start delivery-service background workers ────────────────────────
-  const { pool: deliveryPool } = await import(
-    "../services/delivery-service/src/db/pool.js"
-  );
-  const {
-    isOnline: deliveryIsOnline,
-    publishDeliver,
-    subscribeReceipts,
-  } = await import("../services/delivery-service/src/redis.js");
-  const { publishReceiptEvent } = await import(
-    "../services/delivery-service/src/kafka.js"
-  );
-  const { handleMessageCreated, handleReceipt } = await import(
-    "../services/delivery-service/src/delivery.js"
-  );
-  const { startMessageConsumer: startDeliveryConsumer } = await import(
-    "../services/delivery-service/src/kafka.js"
-  );
-
-  const deliveryDeps = {
-    pool: deliveryPool,
-    isOnline: deliveryIsOnline,
-    publishDeliver,
-    publishReceiptEvent,
-  };
-
-  await subscribeReceipts((receipt) => {
-    handleReceipt(receipt, deliveryDeps).catch((err) =>
-      console.error("[delivery-service] receipt handler error:", err.message)
-    );
-  });
-  console.log("[unified-backend]   delivery-service   → receipts listener active");
-
-  // Retry Kafka consumer start (Kafka may take a moment)
-  for (let attempt = 1; attempt <= 15; attempt++) {
-    try {
-      await startDeliveryConsumer((event) =>
-        handleMessageCreated(event, deliveryDeps)
-      );
-      console.log("[unified-backend]   delivery-service   → Kafka consumer active");
-      break;
-    } catch (err) {
-      console.error(
-        `[unified-backend] delivery consumer failed (attempt ${attempt}/15):`,
-        err.message
-      );
-      if (attempt === 15) {
-        console.error("[unified-backend] delivery consumer gave up — messages won't be delivered until restart");
-      }
-      await new Promise((r) => setTimeout(r, 5000));
-    }
-  }
-
-  // ── 8. Start notification-service background workers ────────────────────
-  const { pool: notificationPool } = await import(
-    "../services/notification-service/src/db/pool.js"
-  );
-  const { isOnline: notificationIsOnline } = await import(
-    "../services/notification-service/src/redis.js"
-  );
-  const { handleMessageCreated: handleNotification } = await import(
-    "../services/notification-service/src/notifications.js"
-  );
-  const { startMessageConsumer: startNotificationConsumer } = await import(
-    "../services/notification-service/src/kafka.js"
-  );
-
-  const notificationDeps = {
-    pool: notificationPool,
-    isOnline: notificationIsOnline,
-    log: (msg) => console.log(`[notification-service] ${msg}`),
-  };
-
-  for (let attempt = 1; attempt <= 15; attempt++) {
-    try {
-      await startNotificationConsumer((event) =>
-        handleNotification(event, notificationDeps)
-      );
-      console.log(
-        "[unified-backend]   notification-svc   → Kafka consumer active"
-      );
-      break;
-    } catch (err) {
-      console.error(
-        `[unified-backend] notification consumer failed (attempt ${attempt}/15):`,
-        err.message
-      );
-      if (attempt === 15) {
-        console.error("[unified-backend] notification consumer gave up");
-      }
-      await new Promise((r) => setTimeout(r, 5000));
-    }
-  }
-
-  // ── 9. Start the API Gateway (public entry point) ───────────────────────
+  // ── 7. Start the API Gateway (public entry point) IMMEDIATELY ───────────
   const http = await import("node:http");
   const { createApp: createGatewayApp } = await import(
     "../services/api-gateway/src/app.js"
@@ -334,9 +240,105 @@ async function main() {
     console.log(
       `[unified-backend]  API Gateway (public) → 0.0.0.0:${gatewayPort}`
     );
-    console.log("[unified-backend]  All services running ✓");
+    console.log("[unified-backend]  All core services running ✓");
     console.log("[unified-backend] ═══════════════════════════════════════");
   });
+
+  // ── 8. Start delivery & notification workers asynchronously (background) ──
+  (async () => {
+    try {
+      const { pool: deliveryPool } = await import(
+        "../services/delivery-service/src/db/pool.js"
+      );
+      const {
+        isOnline: deliveryIsOnline,
+        publishDeliver,
+        subscribeReceipts,
+      } = await import("../services/delivery-service/src/redis.js");
+      const { publishReceiptEvent } = await import(
+        "../services/delivery-service/src/kafka.js"
+      );
+      const { handleMessageCreated, handleReceipt } = await import(
+        "../services/delivery-service/src/delivery.js"
+      );
+      const { startMessageConsumer: startDeliveryConsumer } = await import(
+        "../services/delivery-service/src/kafka.js"
+      );
+
+      const deliveryDeps = {
+        pool: deliveryPool,
+        isOnline: deliveryIsOnline,
+        publishDeliver,
+        publishReceiptEvent,
+      };
+
+      await subscribeReceipts((receipt) => {
+        handleReceipt(receipt, deliveryDeps).catch((err) =>
+          console.error("[delivery-service] receipt handler error:", err.message)
+        );
+      });
+      console.log("[unified-backend]   delivery-service   → receipts listener active");
+
+      for (let attempt = 1; attempt <= 15; attempt++) {
+        try {
+          await startDeliveryConsumer((event) =>
+            handleMessageCreated(event, deliveryDeps)
+          );
+          console.log("[unified-backend]   delivery-service   → Kafka consumer active");
+          break;
+        } catch (err) {
+          if (attempt === 15) {
+            console.log("[unified-backend] delivery consumer skipped (Kafka not configured)");
+          }
+          await new Promise((r) => setTimeout(r, 3000));
+        }
+      }
+    } catch (err) {
+      console.log("[unified-backend] delivery worker init error:", err.message);
+    }
+  })();
+
+  (async () => {
+    try {
+      const { pool: notificationPool } = await import(
+        "../services/notification-service/src/db/pool.js"
+      );
+      const { isOnline: notificationIsOnline } = await import(
+        "../services/notification-service/src/redis.js"
+      );
+      const { handleMessageCreated: handleNotification } = await import(
+        "../services/notification-service/src/notifications.js"
+      );
+      const { startMessageConsumer: startNotificationConsumer } = await import(
+        "../services/notification-service/src/kafka.js"
+      );
+
+      const notificationDeps = {
+        pool: notificationPool,
+        isOnline: notificationIsOnline,
+        log: (msg) => console.log(`[notification-service] ${msg}`),
+      };
+
+      for (let attempt = 1; attempt <= 15; attempt++) {
+        try {
+          await startNotificationConsumer((event) =>
+            handleNotification(event, notificationDeps)
+          );
+          console.log(
+            "[unified-backend]   notification-svc   → Kafka consumer active"
+          );
+          break;
+        } catch (err) {
+          if (attempt === 15) {
+            console.log("[unified-backend] notification consumer skipped (Kafka not configured)");
+          }
+          await new Promise((r) => setTimeout(r, 3000));
+        }
+      }
+    } catch (err) {
+      console.log("[unified-backend] notification worker init error:", err.message);
+    }
+  })();
 }
 
 main().catch((err) => {

@@ -169,6 +169,26 @@ describe("HTTP proxy", () => {
     const res = await request(`http://127.0.0.1:${gatewayPort()}`).get("/nope");
     expect(res.status).toBe(404);
   });
+
+  it("supports CORS and handles preflight OPTIONS requests", async () => {
+    // Test preflight request
+    const preflight = await request(`http://127.0.0.1:${gatewayPort()}`)
+      .options("/api/users/search")
+      .set("Origin", "https://nexora.netlify.app")
+      .set("Access-Control-Request-Method", "GET");
+
+    expect(preflight.status).toBe(204);
+    expect(preflight.headers["access-control-allow-origin"]).toBe("https://nexora.netlify.app");
+    expect(preflight.headers["access-control-allow-methods"]).toContain("GET");
+
+    // Test normal request with Origin
+    const res = await request(`http://127.0.0.1:${gatewayPort()}`)
+      .post("/api/auth/login")
+      .set("Origin", "https://nexora.netlify.app")
+      .send({ email: "a@b.c", password: "secret" });
+
+    expect(res.headers["access-control-allow-origin"]).toBe("https://nexora.netlify.app");
+  });
 });
 
 describe("WebSocket upgrade", () => {

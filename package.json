@@ -12,6 +12,7 @@
   },
   "workspaces": [
     "services/*",
-    "packages/*"
+    "packages/*",
+    "backend"
   ]
 }
